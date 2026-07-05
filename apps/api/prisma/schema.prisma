@@ -1,0 +1,90 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(uuid())
+  lineUid   String?  @unique
+  email     String?  @unique
+  nickname  String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  seriesUnlocks SeriesUnlock[]
+  memberships   Membership[]
+}
+
+model Series {
+  id               String   @id @default(uuid())
+  title            String
+  description      String?
+  coverUrl         String?
+  freeEpisodeCount Int      @default(2)
+  unlockPriceCents Int      @default(9900)
+  status           String   @default("draft")
+  createdAt        DateTime @default(now())
+
+  episodes      Episode[]
+  seriesUnlocks SeriesUnlock[]
+}
+
+model Episode {
+  id              String   @id @default(uuid())
+  seriesId        String
+  episodeNumber   Int
+  title           String
+  r2Key           String
+  durationSeconds Int?
+  status          String   @default("draft")
+  createdAt       DateTime @default(now())
+
+  series Series @relation(fields: [seriesId], references: [id])
+
+  @@unique([seriesId, episodeNumber])
+}
+
+model SeriesUnlock {
+  id         String   @id @default(uuid())
+  userId     String
+  seriesId   String
+  source     String   @default("manual")
+  unlockedAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  series Series @relation(fields: [seriesId], references: [id])
+
+  @@unique([userId, seriesId])
+}
+
+model MembershipPlan {
+  id           String @id @default(uuid())
+  name         String
+  priceCents   Int
+  durationDays Int
+
+  memberships Membership[]
+}
+
+model Membership {
+  id      String   @id @default(uuid())
+  userId  String
+  planId  String
+  startAt DateTime @default(now())
+  endAt   DateTime
+  source  String   @default("manual")
+
+  user User           @relation(fields: [userId], references: [id])
+  plan MembershipPlan @relation(fields: [planId], references: [id])
+}
