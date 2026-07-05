@@ -7,6 +7,7 @@ import { userAuthRoutes } from './routes/user-auth.js';
 import { seriesRoutes } from './routes/series.js';
 import { episodeRoutes } from './routes/episodes.js';
 import { playbackRoutes } from './routes/playback.js';
+import { grantRoutes } from './routes/grants.js';
 
 export interface BuildAppOptions {
   prisma?: PrismaClient;
@@ -25,6 +26,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   app.register(seriesRoutes);
   app.register(episodeRoutes);
   app.register(playbackRoutes);
+  app.register(grantRoutes);
 
   app.addHook('onClose', async () => {
     if (!opts.prisma) {
