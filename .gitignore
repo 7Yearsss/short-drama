@@ -4,3 +4,5 @@ dist/
 .env
 .env.test
 *.log
+next-env.d.ts
+*.tsbuildinfo
