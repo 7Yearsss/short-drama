@@ -39,6 +39,43 @@ describe('grant routes', () => {
     await app.close();
   });
 
+  it('extends remaining membership time rather than resetting it', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const user = await prisma.user.create({ data: { lineUid: 'U1', nickname: 'Ken' } });
+    const plan = await prisma.membershipPlan.create({ data: { name: 'Monthly', priceCents: 29900, durationDays: 30 } });
+
+    const now = Date.now();
+    const existingEndAt = new Date(now + 10 * 24 * 60 * 60 * 1000);
+    await prisma.membership.create({
+      data: {
+        userId: user.id,
+        planId: plan.id,
+        startAt: new Date(now),
+        endAt: existingEndAt,
+        source: 'manual',
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/grants/membership',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { userId: user.id, planId: plan.id },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const newEndAt = new Date(res.json().endAt);
+    const expectedEndAt = existingEndAt.getTime() + plan.durationDays * 24 * 60 * 60 * 1000;
+    expect(newEndAt.getTime()).toBeCloseTo(expectedEndAt, -3);
+
+    const daysFromNow = (newEndAt.getTime() - now) / (24 * 60 * 60 * 1000);
+    expect(daysFromNow).toBeGreaterThan(39);
+    expect(daysFromNow).toBeLessThan(41);
+
+    await app.close();
+  });
+
   it('returns 404 for an unknown plan', async () => {
     const app = buildApp({ prisma });
     const token = await adminToken(app);
