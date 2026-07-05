@@ -9,4 +9,11 @@ describe('GET /health', () => {
     expect(res.json()).toEqual({ status: 'ok' });
     await app.close();
   });
+
+  it('includes CORS headers on the response', async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'http://example.com' } });
+    expect(res.headers['access-control-allow-origin']).toBeDefined();
+    await app.close();
+  });
 });

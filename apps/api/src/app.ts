@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import jwtPlugin from '@fastify/jwt';
+import cors from '@fastify/cors';
 import { PrismaClient } from '@prisma/client';
 import { healthRoutes } from './routes/health.js';
 import { adminAuthRoutes } from './routes/admin-auth.js';
@@ -18,6 +19,9 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const prisma = opts.prisma ?? new PrismaClient();
 
   app.decorate('prisma', prisma);
+  // In production, set CORS_ORIGIN to the deployed web app's exact origin.
+  // Defaults to '*' for local dev when unset.
+  app.register(cors, { origin: process.env.CORS_ORIGIN ?? '*' });
   app.register(jwtPlugin, { secret: process.env.JWT_SECRET ?? 'dev-secret-change-me' });
 
   app.register(healthRoutes);
