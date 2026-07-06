@@ -1,16 +1,10 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
+import { ensureAdminExists } from '../src/lib/seed-admin.js';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
-  const password = process.env.SEED_ADMIN_PASSWORD ?? 'change-me-now';
-  await prisma.admin.upsert({
-    where: { username },
-    create: { username, passwordHash: await bcrypt.hash(password, 10) },
-    update: {},
-  });
+  await ensureAdminExists(prisma);
 
   await prisma.membershipPlan.upsert({
     where: { id: 'monthly-plan' },
