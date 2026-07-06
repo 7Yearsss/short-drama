@@ -5,6 +5,8 @@ export interface Series {
   title: string;
   description: string | null;
   coverUrl: string | null;
+  freeEpisodeCount: number;
+  unlockPriceCents: number;
 }
 
 export interface Episode {
@@ -17,6 +19,12 @@ export interface Episode {
 export async function fetchSeriesList(): Promise<Series[]> {
   const res = await fetch(`${API_BASE_URL}/api/series`, { cache: 'no-store' });
   if (!res.ok) throw new Error('failed to load series');
+  return res.json();
+}
+
+export async function fetchSeriesDetail(seriesId: string): Promise<Series> {
+  const res = await fetch(`${API_BASE_URL}/api/series/${seriesId}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('failed to load series detail');
   return res.json();
 }
 

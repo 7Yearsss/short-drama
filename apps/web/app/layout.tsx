@@ -1,3 +1,5 @@
+import './globals.css';
+
 export const metadata = {
   title: '短剧馆',
   description: '台湾短剧会员平台',

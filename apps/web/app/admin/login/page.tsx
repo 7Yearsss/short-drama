@@ -29,12 +29,22 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <form onSubmit={submit} style={{ padding: 24, display: 'grid', gap: 12, maxWidth: 320 }}>
-      <h1>管理员登录</h1>
-      <input placeholder="用户名" value={username} onChange={(e) => setUsername(e.target.value)} />
-      <input placeholder="密码" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <button type="submit">登录</button>
-    </form>
+    <div className="admin-shell login-page">
+      <form className="login-card" onSubmit={submit}>
+        <h1>管理员登录</h1>
+        <div className="field">
+          <label htmlFor="username">用户名</label>
+          <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="password">密码</label>
+          <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        <button className="primary-btn admin-primary" type="submit">
+          登录
+        </button>
+      </form>
+    </div>
   );
 }

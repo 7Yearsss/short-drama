@@ -23,6 +23,7 @@ export default function AdminDashboardPage() {
   const [title, setTitle] = useState('');
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   async function loadSeries() {
     const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
@@ -41,6 +42,7 @@ export default function AdminDashboardPage() {
       body: JSON.stringify({ title }),
     });
     setTitle('');
+    setDrawerOpen(false);
     loadSeries();
   }
 
@@ -63,42 +65,128 @@ export default function AdminDashboardPage() {
     alert('已解锁');
   }
 
+  const publishedCount = seriesList.filter((s) => s.status === 'published').length;
+  const draftCount = seriesList.length - publishedCount;
+
   return (
-    <main style={{ padding: 24, display: 'grid', gap: 24 }}>
-      <h1>管理后台</h1>
+    <div className="admin-shell">
+      <main className="admin-main">
+        <header className="admin-header">
+          <div className="admin-title">
+            <h1>内容管理</h1>
+            <p>上传 / 编辑短剧、维护上架状态。后台仅管理员登录后可见。</p>
+          </div>
+          <div className="admin-actions">
+            <Link href="/" className="admin-btn">
+              返回前台
+            </Link>
+            <button className="admin-btn admin-primary" onClick={() => setDrawerOpen(true)}>
+              新建剧集
+            </button>
+          </div>
+        </header>
 
-      <section>
-        <h2>新建剧集</h2>
-        <form onSubmit={createSeries} style={{ display: 'flex', gap: 8 }}>
-          <input placeholder="剧名" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <button type="submit">创建</button>
+        <section className="stats-grid">
+          <article className="stat-card">
+            <span>总剧集</span>
+            <strong>{seriesList.length}</strong>
+          </article>
+          <article className="stat-card">
+            <span>已上架</span>
+            <strong>{publishedCount}</strong>
+          </article>
+          <article className="stat-card">
+            <span>草稿</span>
+            <strong>{draftCount}</strong>
+          </article>
+        </section>
+
+        <article className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>剧集列表</h2>
+              <p>剧名、状态、免费集数、解锁价格。</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>剧名</th>
+                  <th>状态</th>
+                  <th>免费集数</th>
+                  <th>解锁价格</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seriesList.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      <Link href={`/admin/series/${s.id}`}>{s.title}</Link>
+                    </td>
+                    <td>
+                      <span className={`status ${s.status === 'published' ? 'published' : 'draft'}`}>
+                        {s.status === 'published' ? '已上架' : '草稿'}
+                      </span>
+                    </td>
+                    <td>{s.freeEpisodeCount}</td>
+                    <td>NT${(s.unlockPriceCents / 100).toFixed(0)}</td>
+                    <td>
+                      {s.status !== 'published' && (
+                        <button className="admin-btn" onClick={() => publishSeries(s.id)}>
+                          上架
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>手动开通剧集解锁</h2>
+              <p>支付接入前的临时授予方式。</p>
+            </div>
+          </div>
+          <form className="form-grid" style={{ padding: 16 }} onSubmit={grantSeriesUnlock}>
+            <div className="field">
+              <label htmlFor="grantUserId">User ID</label>
+              <input id="grantUserId" value={grantUserId} onChange={(e) => setGrantUserId(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="grantSeriesId">Series ID</label>
+              <input id="grantSeriesId" value={grantSeriesId} onChange={(e) => setGrantSeriesId(e.target.value)} />
+            </div>
+            <button className="admin-btn admin-primary" type="submit">
+              解锁
+            </button>
+          </form>
+        </article>
+      </main>
+
+      <div className={`drawer-backdrop ${drawerOpen ? 'is-open' : ''}`} onClick={() => setDrawerOpen(false)} />
+      <section className={`drawer-panel ${drawerOpen ? 'is-open' : ''}`}>
+        <div className="drawer-head">
+          <h2>新建剧集</h2>
+          <button className="close-btn" onClick={() => setDrawerOpen(false)} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <form className="form-grid" onSubmit={createSeries}>
+          <div className="field">
+            <label htmlFor="newTitle">剧名</label>
+            <input id="newTitle" required value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <button className="admin-btn admin-primary" type="submit">
+            创建
+          </button>
         </form>
       </section>
-
-      <section>
-        <h2>剧集列表</h2>
-        <ul>
-          {seriesList.map((s) => (
-            <li key={s.id}>
-              <Link href={`/admin/series/${s.id}`}>{s.title}</Link> — {s.status} — 免费{s.freeEpisodeCount}集 — 解锁价NT${(s.unlockPriceCents / 100).toFixed(0)}
-              {s.status !== 'published' && (
-                <button onClick={() => publishSeries(s.id)} style={{ marginLeft: 8 }}>
-                  上架
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section>
-        <h2>手动开通剧集解锁</h2>
-        <form onSubmit={grantSeriesUnlock} style={{ display: 'grid', gap: 8, maxWidth: 320 }}>
-          <input placeholder="User ID" value={grantUserId} onChange={(e) => setGrantUserId(e.target.value)} />
-          <input placeholder="Series ID" value={grantSeriesId} onChange={(e) => setGrantSeriesId(e.target.value)} />
-          <button type="submit">解锁</button>
-        </form>
-      </section>
-    </main>
+    </div>
   );
 }
