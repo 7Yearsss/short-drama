@@ -164,6 +164,31 @@ export async function episodeRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/retry',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const episode = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!episode) return reply.code(404).send({ error: 'not_found' });
+      if (episode.status !== 'failed') return reply.code(409).send({ error: 'not_failed' });
+      if (!episode.tempVideoPath) return reply.code(409).send({ error: 'no_retained_file' });
+
+      const updated = await app.prisma.episode.update({
+        where: { id: episode.id },
+        data: { status: 'processing', uploadError: null },
+      });
+
+      enqueueEpisodeUpload(app.prisma, {
+        episodeId: episode.id,
+        tempVideoPath: episode.tempVideoPath,
+        seriesId: episode.seriesId,
+        episodeNumber: episode.episodeNumber,
+      });
+
+      return updated;
+    }
+  );
+
   app.post<{ Body: CreateEpisodeBody }>(
     '/api/admin/episodes',
     { preHandler: requireAdmin },
