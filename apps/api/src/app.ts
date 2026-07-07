@@ -8,6 +8,7 @@ import { adminAuthRoutes } from './routes/admin-auth.js';
 import { userAuthRoutes } from './routes/user-auth.js';
 import { seriesRoutes } from './routes/series.js';
 import { episodeRoutes } from './routes/episodes.js';
+import { coverRoutes } from './routes/covers.js';
 import { playbackRoutes } from './routes/playback.js';
 import { grantRoutes } from './routes/grants.js';
 
@@ -31,6 +32,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   app.register(userAuthRoutes);
   app.register(seriesRoutes);
   app.register(episodeRoutes);
+  app.register(coverRoutes);
   app.register(playbackRoutes);
   app.register(grantRoutes);
 
