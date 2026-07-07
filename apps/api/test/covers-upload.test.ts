@@ -23,16 +23,20 @@ async function adminToken(app: ReturnType<typeof buildApp>) {
   return res.json().token as string;
 }
 
-async function coverUploadPayload(contentType = 'image/jpeg', fieldName = 'cover') {
+async function coverUploadPayload(contentType = 'image/jpeg', fieldName = 'cover', content = Buffer.from('fake image bytes')) {
   return multipartPayload({
     fields: {},
     file: {
       fieldName,
       filename: contentType === 'image/png' ? 'cover.png' : 'cover.jpg',
       contentType,
-      content: Buffer.from('fake image bytes'),
+      content,
     },
   });
+}
+
+async function noFilePayload() {
+  return multipartPayload({ fields: {} });
 }
 
 describe('POST /api/admin/covers/upload', () => {
@@ -70,6 +74,21 @@ describe('POST /api/admin/covers/upload', () => {
     expect(uploadCoverImage).toHaveBeenCalledWith(expect.stringMatching(/\.jpg$/), Buffer.from('fake image bytes'), 'image/jpeg');
   });
 
+  it('uses a png key extension for PNG uploads', async () => {
+    const token = await adminToken(app);
+    const multipart = await coverUploadPayload('image/png');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/covers/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(uploadCoverImage).toHaveBeenCalledWith(expect.stringMatching(/\.png$/), Buffer.from('fake image bytes'), 'image/png');
+  });
+
   it('rejects a non-image file', async () => {
     const token = await adminToken(app);
     const multipart = await coverUploadPayload('text/plain');
@@ -86,9 +105,57 @@ describe('POST /api/admin/covers/upload', () => {
     expect(uploadCoverImage).not.toHaveBeenCalled();
   });
 
+  it('rejects unsupported image types', async () => {
+    const token = await adminToken(app);
+    const multipart = await coverUploadPayload('image/webp');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/covers/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'invalid_file_type' });
+    expect(uploadCoverImage).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized cover files', async () => {
+    const token = await adminToken(app);
+    const multipart = await coverUploadPayload('image/jpeg', 'cover', Buffer.alloc(5 * 1024 * 1024 + 1));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/covers/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toEqual({ error: 'file_too_large' });
+    expect(uploadCoverImage).not.toHaveBeenCalled();
+  });
+
   it('rejects a file uploaded with the wrong field name', async () => {
     const token = await adminToken(app);
     const multipart = await coverUploadPayload('image/jpeg', 'poster');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/covers/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'file_required' });
+    expect(uploadCoverImage).not.toHaveBeenCalled();
+  });
+
+  it('rejects multipart requests without a file', async () => {
+    const token = await adminToken(app);
+    const multipart = await noFilePayload();
 
     const res = await app.inject({
       method: 'POST',

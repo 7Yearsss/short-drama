@@ -9,7 +9,17 @@ const client = new S3Client({
   },
 });
 
+export function buildCoverPublicUrl(publicUrl: string | undefined, key: string): string {
+  const normalizedPublicUrl = publicUrl?.trim().replace(/\/$/, '');
+  if (!normalizedPublicUrl) {
+    throw new Error('R2_COVERS_PUBLIC_URL is required');
+  }
+  return `${normalizedPublicUrl}/${key}`;
+}
+
 export async function uploadCoverImage(key: string, body: Buffer, contentType: string): Promise<string> {
+  const publicCoverUrl = buildCoverPublicUrl(process.env.R2_COVERS_PUBLIC_URL, key);
+
   await client.send(
     new PutObjectCommand({
       Bucket: process.env.R2_COVERS_BUCKET ?? '',
@@ -19,5 +29,5 @@ export async function uploadCoverImage(key: string, body: Buffer, contentType: s
     })
   );
 
-  return `${(process.env.R2_COVERS_PUBLIC_URL ?? '').replace(/\/$/, '')}/${key}`;
+  return publicCoverUrl;
 }
