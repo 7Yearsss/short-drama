@@ -173,17 +173,37 @@ export async function episodeRoutes(app: FastifyInstance) {
       if (episode.status !== 'failed') return reply.code(409).send({ error: 'not_failed' });
       if (!episode.tempVideoPath) return reply.code(409).send({ error: 'no_retained_file' });
 
-      const updated = await app.prisma.episode.update({
-        where: { id: episode.id },
+      const transition = await app.prisma.episode.updateMany({
+        where: { id: episode.id, status: 'failed', tempVideoPath: { not: null } },
         data: { status: 'processing', uploadError: null },
       });
 
-      enqueueEpisodeUpload(app.prisma, {
-        episodeId: episode.id,
-        tempVideoPath: episode.tempVideoPath,
-        seriesId: episode.seriesId,
-        episodeNumber: episode.episodeNumber,
-      });
+      if (transition.count === 0) {
+        const current = await app.prisma.episode.findUnique({ where: { id: episode.id } });
+        if (!current) return reply.code(404).send({ error: 'not_found' });
+        if (current.status === 'failed' && !current.tempVideoPath) return reply.code(409).send({ error: 'no_retained_file' });
+        return reply.code(409).send({ error: 'not_failed' });
+      }
+
+      const updated = await app.prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+
+      try {
+        enqueueEpisodeUpload(app.prisma, {
+          episodeId: episode.id,
+          tempVideoPath: episode.tempVideoPath,
+          seriesId: episode.seriesId,
+          episodeNumber: episode.episodeNumber,
+        });
+      } catch (error) {
+        await app.prisma.episode.update({
+          where: { id: episode.id },
+          data: {
+            status: 'failed',
+            uploadError: errorMessage(error),
+          },
+        });
+        return reply.code(500).send({ error: 'upload_enqueue_failed' });
+      }
 
       return updated;
     }

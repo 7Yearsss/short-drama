@@ -115,6 +115,69 @@ describe('POST /api/admin/episodes/:id/retry', () => {
     expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
   });
 
+  it('rejects a second retry while the episode is already processing', async () => {
+    const token = await adminToken(app);
+    const seriesId = await createSeries(app, token);
+    const episode = await prisma.episode.create({
+      data: {
+        seriesId,
+        episodeNumber: 1,
+        title: 'Episode 1',
+        status: 'failed',
+        tempVideoPath: 'tmp/uploads/retry-source.mp4',
+        uploadError: 'ffmpeg exited 1',
+      },
+    });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/retry`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/retry`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({ error: 'not_failed' });
+    expect(enqueueEpisodeUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the episode failed again when retry enqueue throws', async () => {
+    vi.mocked(enqueueEpisodeUpload).mockImplementationOnce(() => {
+      throw new Error('queue unavailable');
+    });
+    const token = await adminToken(app);
+    const seriesId = await createSeries(app, token);
+    const episode = await prisma.episode.create({
+      data: {
+        seriesId,
+        episodeNumber: 1,
+        title: 'Episode 1',
+        status: 'failed',
+        tempVideoPath: 'tmp/uploads/retry-source.mp4',
+        uploadError: 'ffmpeg exited 1',
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/retry`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: 'upload_enqueue_failed' });
+    const updated = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(updated.status).toBe('failed');
+    expect(updated.tempVideoPath).toBe(episode.tempVideoPath);
+    expect(updated.uploadError).toBe('queue unavailable');
+  });
+
   it('returns 404 for unknown episode', async () => {
     const token = await adminToken(app);
 
@@ -150,6 +213,16 @@ describe('POST /api/admin/episodes/:id/retry', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: 'no_retained_file' });
+    expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
+  });
+
+  it('requires admin authentication', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/episodes/does-not-matter/retry',
+    });
+
+    expect(res.statusCode).toBe(401);
     expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
   });
 });
