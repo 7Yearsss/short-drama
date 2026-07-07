@@ -50,8 +50,6 @@ async function runJob(prisma: PrismaClient, job: UploadJob): Promise<void> {
     const durationSeconds = await probeDuration(outputPath);
     const r2Key = `series/${job.seriesId}/episode-${job.episodeNumber}.mp4`;
     await uploadEpisodeVideo(r2Key, outputPath);
-    await rm(job.tempVideoPath, { force: true });
-    await rm(outputPath, { force: true });
     await prisma.episode.update({
       where: { id: job.episodeId },
       data: {
@@ -62,6 +60,8 @@ async function runJob(prisma: PrismaClient, job: UploadJob): Promise<void> {
         tempVideoPath: null,
       },
     });
+    await rm(job.tempVideoPath, { force: true }).catch(() => undefined);
+    await rm(outputPath, { force: true }).catch(() => undefined);
   } catch (error) {
     await rm(outputPath, { force: true }).catch(() => undefined);
     await prisma.episode.update({

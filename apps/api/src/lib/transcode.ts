@@ -80,7 +80,13 @@ export function probeDuration(filePath: string): Promise<number> {
         reject(new Error(`ffprobe exited ${code}`));
         return;
       }
-      resolve(Math.round(Number(output.trim())));
+      const rawDuration = output.trim();
+      const duration = Number(rawDuration);
+      if (!rawDuration || !Number.isFinite(duration)) {
+        reject(new Error('invalid ffprobe duration'));
+        return;
+      }
+      resolve(Math.round(duration));
     });
   });
 }

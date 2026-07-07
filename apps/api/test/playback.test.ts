@@ -73,4 +73,15 @@ describe('GET /api/episodes/:id/playback', () => {
     expect(res.statusCode).toBe(404);
     await app.close();
   });
+
+  it('returns 404 for a published episode without an uploaded video key', async () => {
+    const series = await prisma.series.create({ data: { title: 'Test', status: 'published' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'published', r2Key: null },
+    });
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: `/api/episodes/${episode.id}/playback` });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
 });
