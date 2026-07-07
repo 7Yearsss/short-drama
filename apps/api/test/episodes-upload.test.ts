@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { buildApp } from '../src/app.js';
@@ -24,15 +24,32 @@ async function adminToken(app: ReturnType<typeof buildApp>) {
   return res.json().token as string;
 }
 
-async function videoUploadPayload(fields: Record<string, string>, contentType = 'video/mp4') {
+async function videoUploadPayload(
+  fields: Record<string, string>,
+  contentType = 'video/mp4',
+  options: { fieldName?: string; fileFirst?: boolean; includeFile?: boolean } = {}
+) {
   return multipartPayload({
     fields,
-    file: {
-      fieldName: 'video',
-      filename: contentType.startsWith('video/') ? 'episode.mp4' : 'notes.txt',
-      contentType,
-      content: Buffer.from('fake video bytes'),
-    },
+    file:
+      options.includeFile === false
+        ? undefined
+        : {
+            fieldName: options.fieldName ?? 'video',
+            filename: contentType.startsWith('video/') ? 'episode.mp4' : 'notes.txt',
+            contentType,
+            content: Buffer.from('fake video bytes'),
+          },
+    fileFirst: options.fileFirst,
+  });
+}
+
+async function uploadDirEntries() {
+  return readdir(UPLOAD_DIR).catch((error: unknown) => {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
   });
 }
 
@@ -118,6 +135,36 @@ describe('POST /api/admin/episodes/upload', () => {
     expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
   });
 
+  it('accepts the video file before the text fields', async () => {
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const multipart = await videoUploadPayload(
+      {
+        seriesId: series.id,
+        episodeNumber: '1',
+        title: 'Episode 1',
+      },
+      'video/mp4',
+      { fileFirst: true }
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/episodes/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      seriesId: series.id,
+      episodeNumber: 1,
+      title: 'Episode 1',
+      status: 'processing',
+    });
+    expect(enqueueEpisodeUpload).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 400 when the episode number is already taken', async () => {
     const token = await adminToken(app);
     const series = await prisma.series.create({ data: { title: 'Test Series' } });
@@ -166,5 +213,84 @@ describe('POST /api/admin/episodes/upload', () => {
     expect(res.json()).toEqual({ error: 'invalid_video' });
     expect(await prisma.episode.count()).toBe(0);
     expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the uploaded file field is not video', async () => {
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const multipart = await videoUploadPayload(
+      {
+        seriesId: series.id,
+        episodeNumber: '1',
+        title: 'Episode 1',
+      },
+      'video/mp4',
+      { fieldName: 'poster' }
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/episodes/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'missing_video' });
+    expect(await prisma.episode.count()).toBe(0);
+    expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when no file is uploaded', async () => {
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const multipart = await videoUploadPayload(
+      {
+        seriesId: series.id,
+        episodeNumber: '1',
+        title: 'Episode 1',
+      },
+      'video/mp4',
+      { includeFile: false }
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/episodes/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'missing_video' });
+    expect(await prisma.episode.count()).toBe(0);
+    expect(enqueueEpisodeUpload).not.toHaveBeenCalled();
+  });
+
+  it('cleans up the temp file and marks the episode failed when enqueue throws', async () => {
+    vi.mocked(enqueueEpisodeUpload).mockImplementationOnce(() => {
+      throw new Error('queue unavailable');
+    });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const multipart = await videoUploadPayload({
+      seriesId: series.id,
+      episodeNumber: '1',
+      title: 'Episode 1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/admin/episodes/upload',
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    expect(await uploadDirEntries()).toEqual([]);
+    const episode = await prisma.episode.findFirstOrThrow();
+    expect(episode.status).toBe('failed');
+    expect(episode.tempVideoPath).toBeNull();
+    expect(episode.uploadError).toContain('queue unavailable');
   });
 });

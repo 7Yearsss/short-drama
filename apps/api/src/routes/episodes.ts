@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { createWriteStream } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
+import { Writable } from 'node:stream';
 import { FastifyInstance } from 'fastify';
+import { Prisma, type Episode } from '@prisma/client';
 import { requireAdmin } from '../middleware/require-admin.js';
 import { enqueueEpisodeUpload } from '../lib/upload-queue.js';
 
@@ -23,65 +25,143 @@ interface UpdateEpisodeBody {
 
 export const UPLOAD_DIR = path.join(process.cwd(), 'tmp', 'uploads');
 
-function multipartField(fields: Record<string, unknown>, key: string): string | undefined {
-  const field = fields[key];
-  if (!field || Array.isArray(field) || typeof field !== 'object' || !('value' in field)) {
-    return undefined;
-  }
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  const value = (field as { value: unknown }).value;
-  return typeof value === 'string' ? value : undefined;
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+async function discardStream(stream: NodeJS.ReadableStream): Promise<void> {
+  await pipeline(
+    stream,
+    new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    })
+  );
 }
 
 export async function episodeRoutes(app: FastifyInstance) {
   app.post('/api/admin/episodes/upload', { preHandler: requireAdmin }, async (request, reply) => {
-    const data = await request.file();
-    if (!data) {
-      return reply.code(400).send({ error: 'missing_video' });
+    const fields: Record<string, string | undefined> = {};
+    let tempVideoPath: string | undefined;
+    let sawAnyFile = false;
+    let sawWrongFileField = false;
+    let sawInvalidVideo = false;
+
+    try {
+      for await (const part of request.parts()) {
+        if (part.type === 'field') {
+          if (typeof part.value === 'string') {
+            fields[part.fieldname] = part.value;
+          }
+          continue;
+        }
+
+        sawAnyFile = true;
+
+        if (part.fieldname !== 'video') {
+          sawWrongFileField = true;
+          await discardStream(part.file);
+          continue;
+        }
+
+        if (!part.mimetype.startsWith('video/')) {
+          sawInvalidVideo = true;
+          await discardStream(part.file);
+          continue;
+        }
+
+        if (tempVideoPath) {
+          sawWrongFileField = true;
+          await discardStream(part.file);
+          continue;
+        }
+
+        await mkdir(UPLOAD_DIR, { recursive: true });
+        tempVideoPath = path.join(UPLOAD_DIR, `${randomUUID()}.mp4`);
+        await pipeline(part.file, createWriteStream(tempVideoPath));
+      }
+
+      if (sawInvalidVideo) {
+        if (tempVideoPath) await rm(tempVideoPath, { force: true });
+        return reply.code(400).send({ error: 'invalid_video' });
+      }
+
+      if (!sawAnyFile || sawWrongFileField || !tempVideoPath) {
+        if (tempVideoPath) await rm(tempVideoPath, { force: true });
+        return reply.code(400).send({ error: 'missing_video' });
+      }
+
+      const seriesId = fields.seriesId;
+      const episodeNumberValue = fields.episodeNumber;
+      const title = fields.title;
+      const episodeNumber = Number(episodeNumberValue);
+
+      if (!seriesId || !episodeNumberValue || !title || !Number.isInteger(episodeNumber) || episodeNumber <= 0) {
+        await rm(tempVideoPath, { force: true });
+        return reply.code(400).send({ error: 'missing_fields' });
+      }
+
+      const series = await app.prisma.series.findUnique({ where: { id: seriesId } });
+      if (!series) {
+        await rm(tempVideoPath, { force: true });
+        return reply.code(404).send({ error: 'series_not_found' });
+      }
+
+      const existing = await app.prisma.episode.findUnique({
+        where: { seriesId_episodeNumber: { seriesId, episodeNumber } },
+      });
+      if (existing) {
+        await rm(tempVideoPath, { force: true });
+        return reply.code(400).send({ error: 'episode_number_taken' });
+      }
+
+      let episode: Episode;
+      try {
+        episode = await app.prisma.episode.create({
+          data: {
+            seriesId,
+            episodeNumber,
+            title,
+            status: 'processing',
+            tempVideoPath,
+          },
+        });
+      } catch (error) {
+        await rm(tempVideoPath, { force: true });
+        if (isUniqueConstraintError(error)) {
+          return reply.code(400).send({ error: 'episode_number_taken' });
+        }
+        throw error;
+      }
+
+      try {
+        enqueueEpisodeUpload(app.prisma, { episodeId: episode.id, tempVideoPath, seriesId, episodeNumber });
+      } catch (error) {
+        await rm(tempVideoPath, { force: true });
+        await app.prisma.episode.update({
+          where: { id: episode.id },
+          data: {
+            status: 'failed',
+            tempVideoPath: null,
+            uploadError: errorMessage(error),
+          },
+        });
+        return reply.code(500).send({ error: 'upload_enqueue_failed' });
+      }
+
+      return episode;
+    } catch (error) {
+      if (tempVideoPath) {
+        await rm(tempVideoPath, { force: true });
+      }
+      request.log.error(error);
+      return reply.code(500).send({ error: 'upload_failed' });
     }
-
-    const fields = data.fields as Record<string, unknown>;
-    const seriesId = multipartField(fields, 'seriesId');
-    const episodeNumberValue = multipartField(fields, 'episodeNumber');
-    const title = multipartField(fields, 'title');
-    const episodeNumber = Number(episodeNumberValue);
-
-    if (!seriesId || !episodeNumberValue || !title || !Number.isInteger(episodeNumber)) {
-      return reply.code(400).send({ error: 'missing_fields' });
-    }
-
-    if (!data.mimetype.startsWith('video/')) {
-      return reply.code(400).send({ error: 'invalid_video' });
-    }
-
-    const series = await app.prisma.series.findUnique({ where: { id: seriesId } });
-    if (!series) {
-      return reply.code(404).send({ error: 'series_not_found' });
-    }
-
-    const existing = await app.prisma.episode.findUnique({
-      where: { seriesId_episodeNumber: { seriesId, episodeNumber } },
-    });
-    if (existing) {
-      return reply.code(400).send({ error: 'episode_number_taken' });
-    }
-
-    await mkdir(UPLOAD_DIR, { recursive: true });
-    const tempVideoPath = path.join(UPLOAD_DIR, `${randomUUID()}.mp4`);
-    await pipeline(data.file, createWriteStream(tempVideoPath));
-
-    const episode = await app.prisma.episode.create({
-      data: {
-        seriesId,
-        episodeNumber,
-        title,
-        status: 'processing',
-        tempVideoPath,
-      },
-    });
-
-    enqueueEpisodeUpload(app.prisma, { episodeId: episode.id, tempVideoPath, seriesId, episodeNumber });
-    return episode;
   });
 
   app.post<{ Body: CreateEpisodeBody }>(
