@@ -222,6 +222,70 @@ export async function episodeRoutes(app: FastifyInstance) {
     }
   );
 
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/publish',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const existing = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      if (!existing.r2Key) return reply.code(409).send({ error: 'video_not_uploaded' });
+
+      const now = new Date();
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const episode = await tx.episode.update({
+          where: { id: existing.id },
+          data: { status: 'published', publishedAt: existing.publishedAt ?? now, offlineAt: null },
+        });
+        await tx.series.update({
+          where: { id: existing.seriesId },
+          data: { lastPublishedEpisodeAt: now },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.publish',
+            targetType: 'episode',
+            targetId: existing.id,
+            seriesId: existing.seriesId,
+            metadata: { episodeNumber: existing.episodeNumber, previousStatus: existing.status },
+          },
+        });
+        return episode;
+      });
+
+      return updated;
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/offline',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const existing = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const episode = await tx.episode.update({
+          where: { id: existing.id },
+          data: { status: 'offline', offlineAt: new Date() },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.offline',
+            targetType: 'episode',
+            targetId: existing.id,
+            seriesId: existing.seriesId,
+            metadata: { episodeNumber: existing.episodeNumber, previousStatus: existing.status },
+          },
+        });
+        return episode;
+      });
+
+      return updated;
+    }
+  );
+
   app.patch<{ Params: { id: string }; Body: UpdateEpisodeBody }>(
     '/api/admin/episodes/:id',
     { preHandler: requireAdmin },

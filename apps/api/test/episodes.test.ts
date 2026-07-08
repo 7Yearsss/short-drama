@@ -141,4 +141,70 @@ describe('episode routes', () => {
     expect(res.json()).toHaveLength(1);
     await app.close();
   });
+
+  it('publishes a draft episode and updates series lastPublishedEpisodeAt', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'draft', r2Key: 'x.mp4' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/publish`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('published');
+    expect(res.json().publishedAt).toBeTypeOf('string');
+
+    const updatedSeries = await prisma.series.findUniqueOrThrow({ where: { id: series.id } });
+    expect(updatedSeries.lastPublishedEpisodeAt).toBeInstanceOf(Date);
+
+    const logs = await prisma.adminAuditLog.findMany();
+    expect(logs.map((log) => log.action)).toEqual(['episode.publish']);
+    await app.close();
+  });
+
+  it('does not publish an episode without a video key', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'draft', r2Key: null },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/publish`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'video_not_uploaded' });
+    await app.close();
+  });
+
+  it('offlines a published episode and hides it from the public episode list', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series', status: 'published' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'published', r2Key: 'x.mp4' },
+    });
+
+    const offlineRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/offline`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(offlineRes.statusCode).toBe(200);
+    expect(offlineRes.json().status).toBe('offline');
+
+    const publicRes = await app.inject({ method: 'GET', url: `/api/series/${series.id}/episodes` });
+    expect(publicRes.json()).toEqual([]);
+    await app.close();
+  });
 });
