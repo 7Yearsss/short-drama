@@ -12,6 +12,8 @@ model Admin {
   username     String   @unique
   passwordHash String
   createdAt    DateTime @default(now())
+
+  auditLogs AdminAuditLog[]
 }
 
 model User {
@@ -27,34 +29,64 @@ model User {
 }
 
 model Series {
-  id               String   @id @default(uuid())
-  title            String
-  description      String?
-  coverUrl         String?
-  freeEpisodeCount Int      @default(2)
-  unlockPriceCents Int      @default(9900)
-  status           String   @default("draft")
-  createdAt        DateTime @default(now())
+  id                     String    @id @default(uuid())
+  title                  String
+  description            String?
+  coverUrl               String?
+  freeEpisodeCount       Int       @default(2)
+  unlockPriceCents       Int       @default(9900)
+  status                 String    @default("draft")
+  updateStatus           String    @default("ongoing")
+  sortOrder              Int       @default(0)
+  lastPublishedEpisodeAt DateTime?
+  publishedAt            DateTime?
+  offlineAt              DateTime?
+  createdAt              DateTime  @default(now())
 
   episodes      Episode[]
   seriesUnlocks SeriesUnlock[]
+  auditLogs     AdminAuditLog[]
 }
 
 model Episode {
-  id              String   @id @default(uuid())
-  seriesId        String
-  episodeNumber   Int
-  title           String
-  r2Key           String?
-  durationSeconds Int?
-  status          String   @default("draft")
-  uploadError     String?
-  tempVideoPath   String?
-  createdAt       DateTime @default(now())
+  id                         String    @id @default(uuid())
+  seriesId                   String
+  episodeNumber              Int
+  title                      String
+  r2Key                      String?
+  durationSeconds            Int?
+  status                     String    @default("draft")
+  uploadError                String?
+  tempVideoPath              String?
+  replacementR2Key           String?
+  replacementDurationSeconds Int?
+  replacementStatus          String?
+  replacementUploadError     String?
+  replacementTempVideoPath   String?
+  publishedAt                DateTime?
+  offlineAt                  DateTime?
+  createdAt                  DateTime  @default(now())
 
   series Series @relation(fields: [seriesId], references: [id])
 
   @@unique([seriesId, episodeNumber])
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  action     String
+  targetType String
+  targetId   String
+  seriesId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  admin  Admin   @relation(fields: [adminId], references: [id])
+  series Series? @relation(fields: [seriesId], references: [id])
+
+  @@index([seriesId, createdAt])
+  @@index([adminId, createdAt])
 }
 
 model SeriesUnlock {
