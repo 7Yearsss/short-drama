@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -31,6 +31,29 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '失败',
 };
 
+const ERROR_LABEL: Record<string, string> = {
+  episode_number_taken: '集数已存在',
+  invalid_video: '请选择有效视频',
+  missing_video: '请选择视频文件',
+  missing_fields: '请填写完整信息',
+  series_not_found: '剧集不存在',
+  upload_enqueue_failed: '转码排队失败，请重试',
+  upload_failed: '上传失败，请重试',
+  not_failed: '当前集数不能重试',
+  no_retained_file: '原始文件已丢失，请重新上传',
+  not_found: '集数不存在',
+};
+
+async function responseError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: string };
+    if (body.error) return ERROR_LABEL[body.error] ?? body.error;
+  } catch {
+    // Non-JSON errors still get a concise user-facing fallback.
+  }
+  return fallback;
+}
+
 export default function AdminSeriesEpisodesPage() {
   const params = useParams<{ id: string }>();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -38,43 +61,95 @@ export default function AdminSeriesEpisodesPage() {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [listError, setListError] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function load() {
-    const res = await fetch(`${API_BASE_URL}/api/admin/series/${params.id}/episodes`, { headers: authJsonHeaders() });
-    setEpisodes(await res.json());
-  }
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/series/${params.id}/episodes`, { headers: authJsonHeaders() });
+      if (!res.ok) {
+        setListError(await responseError(res, '集数加载失败'));
+        return;
+      }
 
-  useEffect(() => {
-    load();
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        setListError('集数加载失败');
+        return;
+      }
+
+      setEpisodes(data);
+      setListError('');
+    } catch {
+      setListError('集数加载失败');
+    }
   }, [params.id]);
 
+  const hasProcessing = useMemo(() => episodes.some((ep) => ep.status === 'processing'), [episodes]);
+
   useEffect(() => {
-    if (!episodes.some((ep) => ep.status === 'processing')) return;
-    const timer = setInterval(load, 3000);
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const timer = setInterval(() => {
+      void load();
+    }, 3000);
     return () => clearInterval(timer);
-  }, [episodes, params.id]);
+  }, [hasProcessing, load]);
 
   async function publish(id: string) {
-    await fetch(`${API_BASE_URL}/api/admin/episodes/${id}`, {
-      method: 'PATCH',
-      headers: authJsonHeaders(),
-      body: JSON.stringify({ status: 'published' }),
-    });
-    load();
+    setActionError('');
+    setPendingActionId(id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/episodes/${id}`, {
+        method: 'PATCH',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({ status: 'published' }),
+      });
+      if (!res.ok) {
+        setActionError(await responseError(res, '上架失败'));
+        return;
+      }
+      await load();
+    } catch {
+      setActionError('上架失败');
+    } finally {
+      setPendingActionId(null);
+    }
   }
 
   async function retry(id: string) {
-    await fetch(`${API_BASE_URL}/api/admin/episodes/${id}/retry`, {
-      method: 'POST',
-      headers: authOnlyHeaders(),
-    });
-    load();
+    setActionError('');
+    setPendingActionId(id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/episodes/${id}/retry`, {
+        method: 'POST',
+        headers: authOnlyHeaders(),
+      });
+      if (!res.ok) {
+        setActionError(await responseError(res, '重试失败'));
+        return;
+      }
+      await load();
+    } catch {
+      setActionError('重试失败');
+    } finally {
+      setPendingActionId(null);
+    }
   }
 
   async function upload(e: FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    setUploadError('');
+    if (!file) {
+      setUploadError('请选择视频文件');
+      return;
+    }
 
     setUploading(true);
     try {
@@ -84,17 +159,23 @@ export default function AdminSeriesEpisodesPage() {
       form.append('title', title);
       form.append('video', file);
 
-      await fetch(`${API_BASE_URL}/api/admin/episodes/upload`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/episodes/upload`, {
         method: 'POST',
         headers: authOnlyHeaders(),
         body: form,
       });
+      if (!res.ok) {
+        setUploadError(await responseError(res, '上传失败'));
+        return;
+      }
 
       setEpisodeNumber('');
       setTitle('');
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      load();
+      await load();
+    } catch {
+      setUploadError('上传失败');
     } finally {
       setUploading(false);
     }
@@ -149,6 +230,7 @@ export default function AdminSeriesEpisodesPage() {
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </div>
+            {uploadError && <p className="error-text">{uploadError}</p>}
             <button className="admin-btn admin-primary" type="submit" disabled={uploading}>
               {uploading ? '上传中…' : '上传'}
             </button>
@@ -162,6 +244,12 @@ export default function AdminSeriesEpisodesPage() {
               <p>集数、标题、状态与上架操作。</p>
             </div>
           </div>
+          {(listError || actionError) && (
+            <div style={{ padding: '12px 16px 0' }}>
+              {listError && <p className="error-text">{listError}</p>}
+              {actionError && <p className="error-text">{actionError}</p>}
+            </div>
+          )}
           <div className="table-wrap">
             <table>
               <thead>
@@ -190,13 +278,13 @@ export default function AdminSeriesEpisodesPage() {
                     </td>
                     <td>
                       {ep.status === 'draft' && (
-                        <button className="admin-btn" onClick={() => publish(ep.id)}>
-                          上架
+                        <button className="admin-btn" disabled={pendingActionId === ep.id} onClick={() => publish(ep.id)}>
+                          {pendingActionId === ep.id ? '上架中…' : '上架'}
                         </button>
                       )}
                       {ep.status === 'failed' && (
-                        <button className="admin-btn" onClick={() => retry(ep.id)}>
-                          重试
+                        <button className="admin-btn" disabled={pendingActionId === ep.id} onClick={() => retry(ep.id)}>
+                          {pendingActionId === ep.id ? '重试中…' : '重试'}
                         </button>
                       )}
                     </td>
