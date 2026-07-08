@@ -21,6 +21,8 @@ function authHeaders() {
 export default function AdminDashboardPage() {
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [title, setTitle] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [createError, setCreateError] = useState('');
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -34,16 +36,54 @@ export default function AdminDashboardPage() {
     loadSeries();
   }, []);
 
-  async function createSeries(e: FormEvent) {
+  async function createSeries(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    await fetch(`${API_BASE_URL}/api/admin/series`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ title }),
-    });
-    setTitle('');
-    setDrawerOpen(false);
-    loadSeries();
+    const form = e.currentTarget;
+    setCreateError('');
+
+    try {
+      let coverUrl: string | undefined;
+
+      if (coverFile) {
+        const token = localStorage.getItem('sd_admin_token');
+        const formData = new FormData();
+        formData.append('cover', coverFile);
+
+        const uploadRes = await fetch(`${API_BASE_URL}/api/admin/covers/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error('封面上传失败，请重试');
+        }
+
+        const uploadedCover = (await uploadRes.json()) as { url?: string };
+        if (!uploadedCover.url) {
+          throw new Error('封面上传失败，请重试');
+        }
+        coverUrl = uploadedCover.url;
+      }
+
+      const createRes = await fetch(`${API_BASE_URL}/api/admin/series`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ title, coverUrl }),
+      });
+
+      if (!createRes.ok) {
+        throw new Error('创建剧集失败，请重试');
+      }
+
+      setTitle('');
+      setCoverFile(null);
+      form.reset();
+      setDrawerOpen(false);
+      loadSeries();
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : '创建剧集失败，请重试');
+    }
   }
 
   async function publishSeries(id: string) {
@@ -80,7 +120,13 @@ export default function AdminDashboardPage() {
             <Link href="/" className="admin-btn">
               返回前台
             </Link>
-            <button className="admin-btn admin-primary" onClick={() => setDrawerOpen(true)}>
+            <button
+              className="admin-btn admin-primary"
+              onClick={() => {
+                setCreateError('');
+                setDrawerOpen(true);
+              }}
+            >
               新建剧集
             </button>
           </div>
@@ -182,6 +228,11 @@ export default function AdminDashboardPage() {
             <label htmlFor="newTitle">剧名</label>
             <input id="newTitle" required value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
+          <div className="field">
+            <label htmlFor="newCover">封面图片（可选）</label>
+            <input id="newCover" type="file" accept="image/*" onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)} />
+          </div>
+          {createError && <p role="alert">{createError}</p>}
           <button className="admin-btn admin-primary" type="submit">
             创建
           </button>
