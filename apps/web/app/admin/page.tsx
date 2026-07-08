@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import Link from 'next/link';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
@@ -23,9 +23,11 @@ export default function AdminDashboardPage() {
   const [title, setTitle] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [createError, setCreateError] = useState('');
+  const [creating, setCreating] = useState(false);
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const creatingRef = useRef(false);
 
   async function loadSeries() {
     const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
@@ -38,7 +40,11 @@ export default function AdminDashboardPage() {
 
   async function createSeries(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (creatingRef.current) return;
+
     const form = e.currentTarget;
+    creatingRef.current = true;
+    setCreating(true);
     setCreateError('');
     let fallbackErrorMessage = '创建失败，请稍后重试';
 
@@ -89,6 +95,9 @@ export default function AdminDashboardPage() {
       loadSeries();
     } catch {
       setCreateError(fallbackErrorMessage);
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
     }
   }
 
@@ -238,9 +247,13 @@ export default function AdminDashboardPage() {
             <label htmlFor="newCover">封面图片（可选）</label>
             <input id="newCover" type="file" accept="image/*" onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)} />
           </div>
-          {createError && <p role="alert">{createError}</p>}
-          <button className="admin-btn admin-primary" type="submit">
-            创建
+          {createError && (
+            <p className="error-text" role="alert">
+              {createError}
+            </p>
+          )}
+          <button className="admin-btn admin-primary" type="submit" disabled={creating}>
+            {creating ? '创建中…' : '创建'}
           </button>
         </form>
       </section>
