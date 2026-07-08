@@ -148,6 +148,9 @@ describe('series routes', () => {
     await prisma.episode.create({
       data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'failed', uploadError: 'bad file' },
     });
+    await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 2, title: 'Ep 2', status: 'draft' },
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -164,6 +167,32 @@ describe('series routes', () => {
         { code: 'free_count_exceeds_published', message: '免费集数大于当前已上架集数' },
       ]),
     });
+    await app.close();
+  });
+
+  it('returns missing episodes blocker when a series only has failed episodes', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({
+      data: { title: 'Failed Only', coverUrl: 'https://img.example/cover.jpg' },
+    });
+    await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'failed', uploadError: 'bad file' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/admin/series/${series.id}/publish-checks`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().blockers).toEqual(
+      expect.arrayContaining([{ code: 'missing_episodes', message: '请先上传至少一集' }])
+    );
+    expect(res.json().warnings).toEqual(
+      expect.arrayContaining([{ code: 'has_failed_episodes', message: '存在转码失败的集数' }])
+    );
     await app.close();
   });
 
@@ -228,6 +257,23 @@ describe('series routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().map((series: { title: string }) => series.title)).toEqual(['甜宠日记']);
+    await app.close();
+  });
+
+  it('treats all admin status filters as unfiltered', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    await prisma.series.create({ data: { title: 'Draft Show', status: 'draft', updateStatus: 'ongoing' } });
+    await prisma.series.create({ data: { title: 'Offline Show', status: 'offline', updateStatus: 'completed' } });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/admin/series?status=all&updateStatus=all',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((series: { title: string }) => series.title).sort()).toEqual(['Draft Show', 'Offline Show']);
     await app.close();
   });
 });

@@ -36,10 +36,10 @@ export async function seriesRoutes(app: FastifyInstance) {
       if (query) {
         where.title = { contains: query, mode: 'insensitive' };
       }
-      if (request.query.status) {
+      if (request.query.status && request.query.status !== 'all') {
         where.status = request.query.status;
       }
-      if (request.query.updateStatus) {
+      if (request.query.updateStatus && request.query.updateStatus !== 'all') {
         where.updateStatus = request.query.updateStatus;
       }
 
@@ -131,7 +131,7 @@ export async function seriesRoutes(app: FastifyInstance) {
     const publishedEpisodeCount = series.episodes.filter((episode) => episode.status === 'published').length;
     const processingEpisodeCount = series.episodes.filter((episode) => episode.status === 'processing').length;
     const failedEpisodeCount = series.episodes.filter((episode) => episode.status === 'failed').length;
-    const draftEpisodeCount = series.episodes.filter((episode) => episode.status === 'draft' || episode.status === 'failed').length;
+    const draftEpisodeCount = series.episodes.filter((episode) => episode.status === 'draft').length;
 
     return evaluateSeriesPublishChecks({
       title: series.title,
