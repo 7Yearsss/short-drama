@@ -45,9 +45,11 @@ model Episode {
   seriesId        String
   episodeNumber   Int
   title           String
-  r2Key           String
+  r2Key           String?
   durationSeconds Int?
   status          String   @default("draft")
+  uploadError     String?
+  tempVideoPath   String?
   createdAt       DateTime @default(now())
 
   series Series @relation(fields: [seriesId], references: [id])

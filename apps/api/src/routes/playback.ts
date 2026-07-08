@@ -20,6 +20,9 @@ export async function playbackRoutes(app: FastifyInstance) {
       if (!allowed) {
         return reply.code(403).send({ error: 'locked' });
       }
+      if (!episode.r2Key) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
       const url = await getPlaybackUrl(episode.r2Key);
       return { url, expiresIn: 300 };
     }

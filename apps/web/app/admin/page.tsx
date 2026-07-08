@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import Link from 'next/link';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
@@ -21,38 +21,120 @@ function authHeaders() {
 export default function AdminDashboardPage() {
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [title, setTitle] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [createError, setCreateError] = useState('');
+  const [listError, setListError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [creating, setCreating] = useState(false);
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const creatingRef = useRef(false);
 
   async function loadSeries() {
-    const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
-    setSeriesList(await res.json());
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
+      if (!res.ok) {
+        setListError('剧集列表加载失败，请重新登录后再试');
+        return;
+      }
+
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        setListError('剧集列表加载失败，请稍后重试');
+        return;
+      }
+
+      setSeriesList(data);
+      setListError('');
+    } catch {
+      setListError('剧集列表加载失败，请稍后重试');
+    }
   }
 
   useEffect(() => {
     loadSeries();
   }, []);
 
-  async function createSeries(e: FormEvent) {
+  async function createSeries(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    await fetch(`${API_BASE_URL}/api/admin/series`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ title }),
-    });
-    setTitle('');
-    setDrawerOpen(false);
-    loadSeries();
+    if (creatingRef.current) return;
+
+    const form = e.currentTarget;
+    creatingRef.current = true;
+    setCreating(true);
+    setCreateError('');
+    let fallbackErrorMessage = '创建失败，请稍后重试';
+
+    try {
+      let coverUrl: string | undefined;
+
+      if (coverFile) {
+        fallbackErrorMessage = '封面上传失败，请稍后重试';
+        const token = localStorage.getItem('sd_admin_token');
+        const formData = new FormData();
+        formData.append('cover', coverFile);
+
+        const uploadRes = await fetch(`${API_BASE_URL}/api/admin/covers/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          setCreateError('封面上传失败，请重试');
+          return;
+        }
+
+        const uploadedCover = (await uploadRes.json()) as { url?: string };
+        if (!uploadedCover.url) {
+          setCreateError('封面上传失败，请重试');
+          return;
+        }
+        coverUrl = uploadedCover.url;
+      }
+
+      fallbackErrorMessage = '创建失败，请稍后重试';
+      const createRes = await fetch(`${API_BASE_URL}/api/admin/series`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ title, coverUrl }),
+      });
+
+      if (!createRes.ok) {
+        setCreateError('创建剧集失败，请重试');
+        return;
+      }
+
+      setTitle('');
+      setCoverFile(null);
+      form.reset();
+      setDrawerOpen(false);
+      loadSeries();
+    } catch {
+      setCreateError(fallbackErrorMessage);
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
   }
 
   async function publishSeries(id: string) {
-    await fetch(`${API_BASE_URL}/api/admin/series/${id}`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ status: 'published' }),
-    });
-    loadSeries();
+    setActionError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/series/${id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'published' }),
+      });
+      if (!res.ok) {
+        setActionError('上架失败，请稍后重试');
+        return;
+      }
+      await loadSeries();
+    } catch {
+      setActionError('上架失败，请稍后重试');
+    }
   }
 
   async function grantSeriesUnlock(e: FormEvent) {
@@ -80,7 +162,13 @@ export default function AdminDashboardPage() {
             <Link href="/" className="admin-btn">
               返回前台
             </Link>
-            <button className="admin-btn admin-primary" onClick={() => setDrawerOpen(true)}>
+            <button
+              className="admin-btn admin-primary"
+              onClick={() => {
+                setCreateError('');
+                setDrawerOpen(true);
+              }}
+            >
               新建剧集
             </button>
           </div>
@@ -108,6 +196,12 @@ export default function AdminDashboardPage() {
               <p>剧名、状态、免费集数、解锁价格。</p>
             </div>
           </div>
+          {(listError || actionError) && (
+            <div style={{ padding: '0 16px 12px' }}>
+              {listError && <p className="error-text">{listError}</p>}
+              {actionError && <p className="error-text">{actionError}</p>}
+            </div>
+          )}
           <div className="table-wrap">
             <table>
               <thead>
@@ -133,11 +227,16 @@ export default function AdminDashboardPage() {
                     <td>{s.freeEpisodeCount}</td>
                     <td>NT${(s.unlockPriceCents / 100).toFixed(0)}</td>
                     <td>
-                      {s.status !== 'published' && (
-                        <button className="admin-btn" onClick={() => publishSeries(s.id)}>
-                          上架
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        <Link href={`/admin/series/${s.id}`} className="admin-btn">
+                          管理集数
+                        </Link>
+                        {s.status !== 'published' && (
+                          <button className="admin-btn" onClick={() => publishSeries(s.id)}>
+                            上架
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -182,8 +281,17 @@ export default function AdminDashboardPage() {
             <label htmlFor="newTitle">剧名</label>
             <input id="newTitle" required value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
-          <button className="admin-btn admin-primary" type="submit">
-            创建
+          <div className="field">
+            <label htmlFor="newCover">封面图片（可选）</label>
+            <input id="newCover" type="file" accept="image/*" onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)} />
+          </div>
+          {createError && (
+            <p className="error-text" role="alert">
+              {createError}
+            </p>
+          )}
+          <button className="admin-btn admin-primary" type="submit" disabled={creating}>
+            {creating ? '创建中…' : '创建'}
           </button>
         </form>
       </section>

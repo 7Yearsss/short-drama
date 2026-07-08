@@ -19,8 +19,8 @@
    - `apps/web` 部署（Vercel 或同一台云主机），`NEXT_PUBLIC_API_BASE_URL` 指向正式 API 域名。
    - 隐私政策/服务条款页面（LINE Developers Console 创建 Provider 时需要这两个 URL）。
 
-4. **视频转码流程验证**
-   - `tools/uploader` 还没跑过真实的 ffmpeg 转码 + R2 上传端到端流程（本地开发时用的假 R2 凭证，没有真实素材）。第一次用真实短剧素材时记得先跑一次完整流程验证。
+4. **视频上传/转码流程验证**
+   - 管理后台 `/admin/series/:id` 已支持直接上传视频，由 API 服务端执行 ffmpeg 转码并上传到 R2；`tools/uploader` 仍保留给开发者机器上的脚本化/批量上传使用。第一次接真实短剧素材时，两条路径都建议各跑一次端到端验证。
 
 ## 暂不做（除非用户明确要求）
 
