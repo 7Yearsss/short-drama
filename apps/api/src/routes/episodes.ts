@@ -228,6 +228,9 @@ export async function episodeRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const existing = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
       if (!existing) return reply.code(404).send({ error: 'not_found' });
+      if (request.body.status === 'published' && !existing.r2Key) {
+        return reply.code(409).send({ error: 'video_not_uploaded' });
+      }
       return app.prisma.episode.update({ where: { id: request.params.id }, data: request.body });
     }
   );
@@ -238,7 +241,7 @@ export async function episodeRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/series/:id/episodes', async (request) => {
     return app.prisma.episode.findMany({
-      where: { seriesId: request.params.id, status: 'published' },
+      where: { seriesId: request.params.id, status: 'published', r2Key: { not: null } },
       orderBy: { episodeNumber: 'asc' },
       select: { id: true, episodeNumber: true, title: true, durationSeconds: true },
     });

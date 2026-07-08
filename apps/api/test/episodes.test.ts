@@ -88,6 +88,41 @@ describe('episode routes', () => {
     await app.close();
   });
 
+  it('rejects publishing an episode before a video key exists', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const seriesId = await createSeries(app, token);
+    const episode = await prisma.episode.create({
+      data: { seriesId, episodeNumber: 1, title: '第1集', status: 'draft' },
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/episodes/${episode.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'published' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'video_not_uploaded' });
+    await app.close();
+  });
+
+  it('public episode listing excludes published episodes without a video key', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const seriesId = await createSeries(app, token);
+    await prisma.episode.create({
+      data: { seriesId, episodeNumber: 1, title: '第1集', status: 'published' },
+    });
+
+    const res = await app.inject({ method: 'GET', url: `/api/series/${seriesId}/episodes` });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(0);
+    await app.close();
+  });
+
   it('admin episode listing includes drafts', async () => {
     const app = buildApp({ prisma });
     const token = await adminToken(app);

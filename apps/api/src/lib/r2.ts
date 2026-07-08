@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -20,13 +21,14 @@ export async function getPlaybackUrl(key: string, expiresInSeconds = 300): Promi
 }
 
 export async function uploadEpisodeVideo(key: string, filePath: string): Promise<void> {
-  const body = await readFile(filePath);
+  const fileStat = await stat(filePath);
   await client.send(
     new PutObjectCommand({
       Bucket: process.env.R2_BUCKET ?? '',
       Key: key,
-      Body: body,
+      Body: createReadStream(filePath),
       ContentType: 'video/mp4',
+      ContentLength: fileStat.size,
     }),
   );
 }
