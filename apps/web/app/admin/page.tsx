@@ -227,11 +227,16 @@ export default function AdminDashboardPage() {
                     <td>{s.freeEpisodeCount}</td>
                     <td>NT${(s.unlockPriceCents / 100).toFixed(0)}</td>
                     <td>
-                      {s.status !== 'published' && (
-                        <button className="admin-btn" onClick={() => publishSeries(s.id)}>
-                          上架
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        <Link href={`/admin/series/${s.id}`} className="admin-btn">
+                          管理集数
+                        </Link>
+                        {s.status !== 'published' && (
+                          <button className="admin-btn" onClick={() => publishSeries(s.id)}>
+                            上架
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
