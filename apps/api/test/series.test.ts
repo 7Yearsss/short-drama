@@ -83,6 +83,9 @@ describe('series routes', () => {
       data: { title: 'Older published loses', status: 'published', sortOrder: 5, lastPublishedEpisodeAt: newer },
     });
     await prisma.series.create({
+      data: { title: 'Never updated sorts last', status: 'published', sortOrder: 5, lastPublishedEpisodeAt: null },
+    });
+    await prisma.series.create({
       data: {
         title: 'Newer created wins',
         status: 'published',
@@ -108,6 +111,7 @@ describe('series routes', () => {
       'Sort order wins',
       'Newer published wins',
       'Older published loses',
+      'Never updated sorts last',
       'Newer created wins',
       'Older created loses',
     ]);

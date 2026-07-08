@@ -41,7 +41,11 @@ export async function seriesRoutes(app: FastifyInstance) {
   app.get('/api/series', async () => {
     return app.prisma.series.findMany({
       where: { status: 'published' },
-      orderBy: [{ sortOrder: 'desc' }, { lastPublishedEpisodeAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        { sortOrder: 'desc' },
+        { lastPublishedEpisodeAt: { sort: 'desc', nulls: 'last' } },
+        { createdAt: 'desc' },
+      ],
     });
   });
 
