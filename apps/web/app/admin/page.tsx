@@ -23,6 +23,8 @@ export default function AdminDashboardPage() {
   const [title, setTitle] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [createError, setCreateError] = useState('');
+  const [listError, setListError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [creating, setCreating] = useState(false);
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
@@ -30,8 +32,24 @@ export default function AdminDashboardPage() {
   const creatingRef = useRef(false);
 
   async function loadSeries() {
-    const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
-    setSeriesList(await res.json());
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
+      if (!res.ok) {
+        setListError('剧集列表加载失败，请重新登录后再试');
+        return;
+      }
+
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        setListError('剧集列表加载失败，请稍后重试');
+        return;
+      }
+
+      setSeriesList(data);
+      setListError('');
+    } catch {
+      setListError('剧集列表加载失败，请稍后重试');
+    }
   }
 
   useEffect(() => {
@@ -102,12 +120,21 @@ export default function AdminDashboardPage() {
   }
 
   async function publishSeries(id: string) {
-    await fetch(`${API_BASE_URL}/api/admin/series/${id}`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ status: 'published' }),
-    });
-    loadSeries();
+    setActionError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/series/${id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'published' }),
+      });
+      if (!res.ok) {
+        setActionError('上架失败，请稍后重试');
+        return;
+      }
+      await loadSeries();
+    } catch {
+      setActionError('上架失败，请稍后重试');
+    }
   }
 
   async function grantSeriesUnlock(e: FormEvent) {
@@ -169,6 +196,12 @@ export default function AdminDashboardPage() {
               <p>剧名、状态、免费集数、解锁价格。</p>
             </div>
           </div>
+          {(listError || actionError) && (
+            <div style={{ padding: '0 16px 12px' }}>
+              {listError && <p className="error-text">{listError}</p>}
+              {actionError && <p className="error-text">{actionError}</p>}
+            </div>
+          )}
           <div className="table-wrap">
             <table>
               <thead>
