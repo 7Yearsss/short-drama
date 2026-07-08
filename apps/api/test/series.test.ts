@@ -243,6 +243,51 @@ describe('series routes', () => {
     await app.close();
   });
 
+  it('rolls back publishing when audit logging fails', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    await prisma.admin.deleteMany();
+    const series = await prisma.series.create({ data: { title: 'Ready', coverUrl: 'https://img.example/cover.jpg' } });
+    await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', status: 'draft', r2Key: 'x.mp4' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/series/${series.id}/publish`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(500);
+    const unchanged = await prisma.series.findUniqueOrThrow({ where: { id: series.id } });
+    expect(unchanged.status).toBe('draft');
+    expect(unchanged.publishedAt).toBeNull();
+    expect(await prisma.adminAuditLog.count()).toBe(0);
+    await app.close();
+  });
+
+  it('rolls back offlining when audit logging fails', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    await prisma.admin.deleteMany();
+    const series = await prisma.series.create({
+      data: { title: 'Live', status: 'published', coverUrl: 'https://img.example/cover.jpg', publishedAt: new Date() },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/series/${series.id}/offline`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(500);
+    const unchanged = await prisma.series.findUniqueOrThrow({ where: { id: series.id } });
+    expect(unchanged.status).toBe('published');
+    expect(unchanged.offlineAt).toBeNull();
+    expect(await prisma.adminAuditLog.count()).toBe(0);
+    await app.close();
+  });
+
   it('filters admin series by search, status, and update status', async () => {
     const app = buildApp({ prisma });
     const token = await adminToken(app);

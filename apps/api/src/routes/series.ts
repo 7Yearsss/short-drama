@@ -1,6 +1,5 @@
 import { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
-import { recordAdminAuditLog } from '../lib/audit-log.js';
 import { evaluateSeriesPublishChecks } from '../lib/publish-checks.js';
 import { requireAdmin } from '../middleware/require-admin.js';
 
@@ -58,7 +57,7 @@ export async function seriesRoutes(app: FastifyInstance) {
     '/api/admin/series/:id/publish-checks',
     { preHandler: requireAdmin },
     async (request, reply) => {
-      const checks = await buildPublishChecks(app, request.params.id);
+      const checks = await buildPublishChecks(app.prisma, request.params.id);
       if (!checks) return reply.code(404).send({ error: 'not_found' });
       return checks;
     }
@@ -68,31 +67,42 @@ export async function seriesRoutes(app: FastifyInstance) {
     '/api/admin/series/:id/publish',
     { preHandler: requireAdmin },
     async (request, reply) => {
-      const series = await app.prisma.series.findUnique({ where: { id: request.params.id } });
-      if (!series) return reply.code(404).send({ error: 'not_found' });
+      const result = await app.prisma.$transaction(async (tx) => {
+        const series = await tx.series.findUnique({
+          where: { id: request.params.id },
+          include: { episodes: { select: { episodeNumber: true, status: true } } },
+        });
+        if (!series) return { result: 'not_found' as const };
 
-      const checks = await buildPublishChecks(app, series.id);
-      if (!checks) return reply.code(404).send({ error: 'not_found' });
-      if (checks.blockers.length > 0) {
-        return reply.code(409).send({ error: 'publish_blocked', ...checks });
+        const checks = evaluatePublishChecksForSeries(series);
+        if (checks.blockers.length > 0) {
+          return { result: 'blocked' as const, checks };
+        }
+
+        const updated = await tx.series.update({
+          where: { id: series.id },
+          data: { status: 'published', publishedAt: series.publishedAt ?? new Date(), offlineAt: null },
+        });
+
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'series.publish',
+            targetType: 'series',
+            targetId: series.id,
+            seriesId: series.id,
+            metadata: { from: series.status, to: 'published' },
+          },
+        });
+
+        return { result: 'published' as const, series: updated };
+      });
+
+      if (result.result === 'not_found') return reply.code(404).send({ error: 'not_found' });
+      if (result.result === 'blocked') {
+        return reply.code(409).send({ error: 'publish_blocked', ...result.checks });
       }
-
-      const publishedAt = series.publishedAt ?? new Date();
-      const updated = await app.prisma.series.update({
-        where: { id: series.id },
-        data: { status: 'published', publishedAt, offlineAt: null },
-      });
-
-      await recordAdminAuditLog(app.prisma, {
-        adminId: request.currentAdmin!.id,
-        action: 'series.publish',
-        targetType: 'series',
-        targetId: series.id,
-        seriesId: series.id,
-        metadata: { from: series.status, to: 'published' },
-      });
-
-      return updated;
+      return result.series;
     }
   );
 
@@ -100,34 +110,53 @@ export async function seriesRoutes(app: FastifyInstance) {
     '/api/admin/series/:id/offline',
     { preHandler: requireAdmin },
     async (request, reply) => {
-      const series = await app.prisma.series.findUnique({ where: { id: request.params.id } });
-      if (!series) return reply.code(404).send({ error: 'not_found' });
+      const result = await app.prisma.$transaction(async (tx) => {
+        const series = await tx.series.findUnique({ where: { id: request.params.id } });
+        if (!series) return { result: 'not_found' as const };
 
-      const updated = await app.prisma.series.update({
-        where: { id: series.id },
-        data: { status: 'offline', offlineAt: new Date() },
+        const updated = await tx.series.update({
+          where: { id: series.id },
+          data: { status: 'offline', offlineAt: new Date() },
+        });
+
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'series.offline',
+            targetType: 'series',
+            targetId: series.id,
+            seriesId: series.id,
+            metadata: { from: series.status, to: 'offline' },
+          },
+        });
+
+        return { result: 'offline' as const, series: updated };
       });
 
-      await recordAdminAuditLog(app.prisma, {
-        adminId: request.currentAdmin!.id,
-        action: 'series.offline',
-        targetType: 'series',
-        targetId: series.id,
-        seriesId: series.id,
-        metadata: { from: series.status, to: 'offline' },
-      });
-
-      return updated;
+      if (result.result === 'not_found') return reply.code(404).send({ error: 'not_found' });
+      return result.series;
     }
   );
 
-  async function buildPublishChecks(appInstance: FastifyInstance, seriesId: string) {
-    const series = await appInstance.prisma.series.findUnique({
+  async function buildPublishChecks(prisma: { series: Prisma.TransactionClient['series'] }, seriesId: string) {
+    const series = await prisma.series.findUnique({
       where: { id: seriesId },
       include: { episodes: { select: { episodeNumber: true, status: true } } },
     });
     if (!series) return null;
 
+    return evaluatePublishChecksForSeries(series);
+  }
+
+  function evaluatePublishChecksForSeries(series: {
+    title: string;
+    description: string | null;
+    coverUrl: string | null;
+    unlockPriceCents: number;
+    freeEpisodeCount: number;
+    updateStatus: string;
+    episodes: { episodeNumber: number; status: string }[];
+  }) {
     const publishedEpisodeCount = series.episodes.filter((episode) => episode.status === 'published').length;
     const processingEpisodeCount = series.episodes.filter((episode) => episode.status === 'processing').length;
     const failedEpisodeCount = series.episodes.filter((episode) => episode.status === 'failed').length;
