@@ -40,11 +40,13 @@ export default function AdminDashboardPage() {
     e.preventDefault();
     const form = e.currentTarget;
     setCreateError('');
+    let fallbackErrorMessage = '创建失败，请稍后重试';
 
     try {
       let coverUrl: string | undefined;
 
       if (coverFile) {
+        fallbackErrorMessage = '封面上传失败，请稍后重试';
         const token = localStorage.getItem('sd_admin_token');
         const formData = new FormData();
         formData.append('cover', coverFile);
@@ -56,16 +58,19 @@ export default function AdminDashboardPage() {
         });
 
         if (!uploadRes.ok) {
-          throw new Error('封面上传失败，请重试');
+          setCreateError('封面上传失败，请重试');
+          return;
         }
 
         const uploadedCover = (await uploadRes.json()) as { url?: string };
         if (!uploadedCover.url) {
-          throw new Error('封面上传失败，请重试');
+          setCreateError('封面上传失败，请重试');
+          return;
         }
         coverUrl = uploadedCover.url;
       }
 
+      fallbackErrorMessage = '创建失败，请稍后重试';
       const createRes = await fetch(`${API_BASE_URL}/api/admin/series`, {
         method: 'POST',
         headers: authHeaders(),
@@ -73,7 +78,8 @@ export default function AdminDashboardPage() {
       });
 
       if (!createRes.ok) {
-        throw new Error('创建剧集失败，请重试');
+        setCreateError('创建剧集失败，请重试');
+        return;
       }
 
       setTitle('');
@@ -81,8 +87,8 @@ export default function AdminDashboardPage() {
       form.reset();
       setDrawerOpen(false);
       loadSeries();
-    } catch (error) {
-      setCreateError(error instanceof Error ? error.message : '创建剧集失败，请重试');
+    } catch {
+      setCreateError(fallbackErrorMessage);
     }
   }
 
