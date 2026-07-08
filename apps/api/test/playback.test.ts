@@ -36,6 +36,35 @@ describe('GET /api/episodes/:id/playback', () => {
     await app.close();
   });
 
+  it('returns a playback url for any published episode of a free series', async () => {
+    const series = await prisma.series.create({
+      data: { title: 'Free Test', status: 'published', unlockPriceCents: 0, freeEpisodeCount: 0 },
+    });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 20, title: 'Ep 20', r2Key: 'free.mp4', status: 'published' },
+    });
+
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: `/api/episodes/${episode.id}/playback` });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().url).toBe('https://signed.example.com/video.mp4');
+    await app.close();
+  });
+
+  it('returns 404 when the parent series is offline', async () => {
+    const series = await prisma.series.create({ data: { title: 'Offline Test', status: 'offline' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 1, title: 'Ep 1', r2Key: 'x.mp4', status: 'published' },
+    });
+
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: `/api/episodes/${episode.id}/playback` });
+
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('returns 403 locked for a paid episode with no auth header', async () => {
     const { episode } = await makePublishedEpisode(3);
     const app = buildApp({ prisma });

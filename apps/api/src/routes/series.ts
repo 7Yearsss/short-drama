@@ -39,7 +39,10 @@ export async function seriesRoutes(app: FastifyInstance) {
   );
 
   app.get('/api/series', async () => {
-    return app.prisma.series.findMany({ where: { status: 'published' }, orderBy: { createdAt: 'desc' } });
+    return app.prisma.series.findMany({
+      where: { status: 'published' },
+      orderBy: [{ sortOrder: 'desc' }, { lastPublishedEpisodeAt: 'desc' }, { createdAt: 'desc' }],
+    });
   });
 
   app.get<{ Params: { id: string } }>('/api/series/:id', async (request, reply) => {

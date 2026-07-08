@@ -24,6 +24,16 @@ describe('hasAccessToEpisode', () => {
     expect(allowed).toBe(true);
   });
 
+  it('allows every episode of a free series without login', async () => {
+    const series = await prisma.series.create({
+      data: { title: 'Free Show', freeEpisodeCount: 0, unlockPriceCents: 0 },
+    });
+
+    const allowed = await hasAccessToEpisode(prisma, undefined, { episodeNumber: 99 }, series);
+
+    expect(allowed).toBe(true);
+  });
+
   it('denies anonymous access to a locked episode', async () => {
     const series = await makeSeries(2);
     const allowed = await hasAccessToEpisode(prisma, undefined, { episodeNumber: 3 }, series);

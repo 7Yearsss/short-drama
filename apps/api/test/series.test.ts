@@ -59,6 +59,32 @@ describe('series routes', () => {
     await app.close();
   });
 
+  it('does not list offline series on the public endpoint', async () => {
+    await prisma.series.create({ data: { title: 'Hidden', status: 'offline' } });
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: '/api/series' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+    await app.close();
+  });
+
+  it('orders public series by sortOrder, lastPublishedEpisodeAt, then createdAt', async () => {
+    const older = new Date('2026-01-01T00:00:00.000Z');
+    const newer = new Date('2026-01-02T00:00:00.000Z');
+    await prisma.series.create({
+      data: { title: 'Recent', status: 'published', sortOrder: 0, lastPublishedEpisodeAt: newer },
+    });
+    await prisma.series.create({
+      data: { title: 'Pinned', status: 'published', sortOrder: 10, lastPublishedEpisodeAt: older },
+    });
+
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: '/api/series' });
+
+    expect(res.json().map((series: { title: string }) => series.title)).toEqual(['Pinned', 'Recent']);
+    await app.close();
+  });
+
   it('lists a series on the public endpoint once published', async () => {
     const app = buildApp({ prisma });
     const token = await adminToken(app);

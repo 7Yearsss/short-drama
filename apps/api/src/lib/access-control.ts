@@ -4,8 +4,11 @@ export async function hasAccessToEpisode(
   prisma: PrismaClient,
   userId: string | undefined,
   episode: { episodeNumber: number },
-  series: { id: string; freeEpisodeCount: number }
+  series: { id: string; freeEpisodeCount: number; unlockPriceCents: number }
 ): Promise<boolean> {
+  if (series.unlockPriceCents === 0) {
+    return true;
+  }
   if (episode.episodeNumber <= series.freeEpisodeCount) {
     return true;
   }
