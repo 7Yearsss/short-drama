@@ -7,6 +7,12 @@ import BottomNav from '@/components/BottomNav';
 import { fetchSeriesList, Series } from '@/lib/api-client';
 import { formatPriceCents } from '@/lib/format';
 
+const UPDATE_STATUS_LABEL: Record<string, string> = {
+  ongoing: '连载中',
+  completed: '已完结',
+  paused: '暂停更新',
+};
+
 export default function HomePage() {
   const [seriesList, setSeriesList] = useState<Series[] | null>(null);
   const [query, setQuery] = useState('');
@@ -67,12 +73,17 @@ export default function HomePage() {
                 className="thumb"
                 style={series.coverUrl ? { backgroundImage: `url(${series.coverUrl})` } : undefined}
               >
-                <span className="tag">前 {series.freeEpisodeCount} 集免费</span>
+                <span className="tag">
+                  {series.unlockPriceCents === 0 ? '免费观看' : `前 ${series.freeEpisodeCount} 集免费`}
+                </span>
               </div>
               <div className="video-body">
                 <strong className="video-title">{series.title}</strong>
                 {series.description && <p className="video-desc">{series.description}</p>}
-                <div className="video-meta">解锁全集 {formatPriceCents(series.unlockPriceCents)}</div>
+                <div className="video-meta">
+                  {UPDATE_STATUS_LABEL[series.updateStatus] ?? '连载中'} ·{' '}
+                  {series.unlockPriceCents === 0 ? '免费观看' : `解锁全集 ${formatPriceCents(series.unlockPriceCents)}`}
+                </div>
               </div>
             </Link>
           ))}

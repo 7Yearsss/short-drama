@@ -39,6 +39,7 @@ export default function SeriesDetailPage() {
   }
 
   const freeEpisodeCount = series?.freeEpisodeCount ?? 0;
+  const isFreeSeries = series?.unlockPriceCents === 0;
   const firstEpisode = episodes[0];
   const activeIndex = episodes.findIndex((episode) => episode.id === activeEpisodeId);
   const nextEpisode = activeIndex >= 0 ? episodes[activeIndex + 1] : undefined;
@@ -74,11 +75,11 @@ export default function SeriesDetailPage() {
                   <button
                     key={episode.id}
                     className={`episode-btn ${episode.id === activeEpisodeId ? 'is-active' : ''} ${
-                      episode.episodeNumber > freeEpisodeCount ? 'is-locked' : ''
+                      !isFreeSeries && episode.episodeNumber > freeEpisodeCount ? 'is-locked' : ''
                     }`}
                     onClick={() => play(episode)}
                   >
-                    {episode.episodeNumber > freeEpisodeCount ? '锁' : episode.episodeNumber}
+                    {!isFreeSeries && episode.episodeNumber > freeEpisodeCount ? '锁' : episode.episodeNumber}
                   </button>
                 ))}
               </div>
