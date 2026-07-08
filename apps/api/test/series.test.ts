@@ -321,4 +321,33 @@ describe('series routes', () => {
     expect(res.json().map((series: { title: string }) => series.title).sort()).toEqual(['Draft Show', 'Offline Show']);
     await app.close();
   });
+
+  it('returns an admin series detail with recent audit logs', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const admin = await prisma.admin.findUniqueOrThrow({ where: { username: 'boss' } });
+    const series = await prisma.series.create({ data: { title: 'Workbench' } });
+    await prisma.adminAuditLog.create({
+      data: {
+        adminId: admin.id,
+        action: 'series.publish',
+        targetType: 'series',
+        targetId: series.id,
+        seriesId: series.id,
+        metadata: { example: true },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/admin/series/${series.id}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().series.title).toBe('Workbench');
+    expect(res.json().recentLogs).toHaveLength(1);
+    expect(res.json().recentLogs[0].action).toBe('series.publish');
+    await app.close();
+  });
 });

@@ -138,6 +138,22 @@ export async function seriesRoutes(app: FastifyInstance) {
     }
   );
 
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/series/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const series = await app.prisma.series.findUnique({ where: { id: request.params.id } });
+      if (!series) return reply.code(404).send({ error: 'not_found' });
+      const recentLogs = await app.prisma.adminAuditLog.findMany({
+        where: { seriesId: series.id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { admin: { select: { username: true } } },
+      });
+      return { series, recentLogs };
+    }
+  );
+
   async function buildPublishChecks(prisma: { series: Prisma.TransactionClient['series'] }, seriesId: string) {
     const series = await prisma.series.findUnique({
       where: { id: seriesId },
