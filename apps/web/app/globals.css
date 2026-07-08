@@ -278,6 +278,8 @@ th { color: var(--admin-muted); font-size: 11px; font-weight: 800; letter-spacin
 .status { display: inline-flex; align-items: center; padding: 0 10px; height: 26px; border-radius: 999px; font-size: 12px; font-weight: 800; }
 .status.published { color: #147045; background: rgba(22,163,74,.12); }
 .status.draft { color: #9a5a00; background: rgba(245,158,11,.14); }
+.status.processing { color: #1d4ed8; background: rgba(37,99,235,.12); }
+.status.failed { color: #b91c1c; background: rgba(220,38,38,.12); }
 
 .form-grid { display: grid; gap: 12px; }
 .field { display: grid; gap: 6px; }
