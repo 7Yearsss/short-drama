@@ -7,6 +7,9 @@ export interface Series {
   coverUrl: string | null;
   freeEpisodeCount: number;
   unlockPriceCents: number;
+  updateStatus: string;
+  sortOrder: number;
+  lastPublishedEpisodeAt: string | null;
 }
 
 export interface Episode {

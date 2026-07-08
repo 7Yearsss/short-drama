@@ -8,6 +8,7 @@ import { FastifyInstance } from 'fastify';
 import { Prisma, type Episode } from '@prisma/client';
 import { requireAdmin } from '../middleware/require-admin.js';
 import { enqueueEpisodeUpload } from '../lib/upload-queue.js';
+import { getPlaybackUrl } from '../lib/r2.js';
 
 interface CreateEpisodeBody {
   seriesId: string;
@@ -219,6 +220,237 @@ export async function episodeRoutes(app: FastifyInstance) {
       return app.prisma.episode.create({
         data: { seriesId, episodeNumber, title, r2Key, durationSeconds },
       });
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/publish',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const existing = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      if (!existing.r2Key) return reply.code(409).send({ error: 'video_not_uploaded' });
+
+      const now = new Date();
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const episode = await tx.episode.update({
+          where: { id: existing.id },
+          data: { status: 'published', publishedAt: existing.publishedAt ?? now, offlineAt: null },
+        });
+        await tx.series.update({
+          where: { id: existing.seriesId },
+          data: { lastPublishedEpisodeAt: now },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.publish',
+            targetType: 'episode',
+            targetId: existing.id,
+            seriesId: existing.seriesId,
+            metadata: { episodeNumber: existing.episodeNumber, previousStatus: existing.status },
+          },
+        });
+        return episode;
+      });
+
+      return updated;
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/offline',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const existing = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const episode = await tx.episode.update({
+          where: { id: existing.id },
+          data: { status: 'offline', offlineAt: new Date() },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.offline',
+            targetType: 'episode',
+            targetId: existing.id,
+            seriesId: existing.seriesId,
+            metadata: { episodeNumber: existing.episodeNumber, previousStatus: existing.status },
+          },
+        });
+        return episode;
+      });
+
+      return updated;
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/replacement/upload',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const episode = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!episode) return reply.code(404).send({ error: 'not_found' });
+      if (episode.status !== 'published' || !episode.r2Key) {
+        return reply.code(409).send({ error: 'not_published' });
+      }
+
+      let tempVideoPath: string | undefined;
+      try {
+        const data = await request.file();
+        if (!data || data.fieldname !== 'video') {
+          if (data) await discardStream(data.file);
+          return reply.code(400).send({ error: 'missing_video' });
+        }
+        if (!data.mimetype.startsWith('video/')) {
+          await discardStream(data.file);
+          return reply.code(400).send({ error: 'invalid_video' });
+        }
+
+        await mkdir(UPLOAD_DIR, { recursive: true });
+        tempVideoPath = path.join(UPLOAD_DIR, `${randomUUID()}.mp4`);
+        await pipeline(data.file, createWriteStream(tempVideoPath));
+
+        const updated = await app.prisma.$transaction(async (tx) => {
+          const replacement = await tx.episode.update({
+            where: { id: episode.id },
+            data: {
+              replacementStatus: 'processing',
+              replacementUploadError: null,
+              replacementTempVideoPath: tempVideoPath,
+              replacementR2Key: null,
+              replacementDurationSeconds: null,
+            },
+          });
+          await tx.adminAuditLog.create({
+            data: {
+              adminId: request.currentAdmin!.id,
+              action: 'episode.replacement_start',
+              targetType: 'episode',
+              targetId: episode.id,
+              seriesId: episode.seriesId,
+              metadata: { episodeNumber: episode.episodeNumber },
+            },
+          });
+          return replacement;
+        });
+
+        try {
+          enqueueEpisodeUpload(app.prisma, {
+            kind: 'replacement',
+            episodeId: episode.id,
+            tempVideoPath,
+            seriesId: episode.seriesId,
+            episodeNumber: episode.episodeNumber,
+          });
+        } catch (error) {
+          await rm(tempVideoPath, { force: true });
+          await app.prisma.episode.update({
+            where: { id: episode.id },
+            data: {
+              replacementStatus: 'failed',
+              replacementTempVideoPath: null,
+              replacementUploadError: errorMessage(error),
+            },
+          });
+          return reply.code(500).send({ error: 'upload_enqueue_failed' });
+        }
+
+        return updated;
+      } catch (error) {
+        if (tempVideoPath) await rm(tempVideoPath, { force: true });
+        request.log.error(error);
+        return reply.code(500).send({ error: 'upload_failed' });
+      }
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/replacement/preview',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const episode = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!episode || !episode.replacementR2Key || episode.replacementStatus !== 'ready') {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      return { url: await getPlaybackUrl(episode.replacementR2Key), expiresIn: 300 };
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/replacement/confirm',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const episode = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!episode) return reply.code(404).send({ error: 'not_found' });
+      if (!episode.replacementR2Key || episode.replacementStatus !== 'ready') {
+        return reply.code(409).send({ error: 'replacement_not_ready' });
+      }
+
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const replacement = await tx.episode.update({
+          where: { id: episode.id },
+          data: {
+            r2Key: episode.replacementR2Key,
+            durationSeconds: episode.replacementDurationSeconds,
+            replacementR2Key: null,
+            replacementDurationSeconds: null,
+            replacementStatus: null,
+            replacementUploadError: null,
+            replacementTempVideoPath: null,
+          },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.replacement_confirm',
+            targetType: 'episode',
+            targetId: episode.id,
+            seriesId: episode.seriesId,
+            metadata: { episodeNumber: episode.episodeNumber },
+          },
+        });
+        return replacement;
+      });
+
+      return updated;
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/episodes/:id/replacement/abandon',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const episode = await app.prisma.episode.findUnique({ where: { id: request.params.id } });
+      if (!episode) return reply.code(404).send({ error: 'not_found' });
+
+      const updated = await app.prisma.$transaction(async (tx) => {
+        const replacement = await tx.episode.update({
+          where: { id: episode.id },
+          data: {
+            replacementR2Key: null,
+            replacementDurationSeconds: null,
+            replacementStatus: null,
+            replacementUploadError: null,
+            replacementTempVideoPath: null,
+          },
+        });
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: request.currentAdmin!.id,
+            action: 'episode.replacement_abandon',
+            targetType: 'episode',
+            targetId: episode.id,
+            seriesId: episode.seriesId,
+            metadata: { episodeNumber: episode.episodeNumber },
+          },
+        });
+        return replacement;
+      });
+
+      return updated;
     }
   );
 

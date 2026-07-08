@@ -3,7 +3,10 @@ import type { PrismaClient } from '@prisma/client';
 import { uploadEpisodeVideo } from './r2.js';
 import { probeDuration, transcodeVideo } from './transcode.js';
 
+export type UploadJobKind = 'episode' | 'replacement';
+
 export interface UploadJob {
+  kind?: UploadJobKind;
   episodeId: string;
   tempVideoPath: string;
   seriesId: string;
@@ -45,25 +48,50 @@ async function drainQueue(prisma: PrismaClient): Promise<void> {
 
 async function runJob(prisma: PrismaClient, job: UploadJob): Promise<void> {
   const outputPath = `${job.tempVideoPath}-encoded.mp4`;
+  const kind = job.kind ?? 'episode';
   try {
     await transcodeVideo(job.tempVideoPath, outputPath);
     const durationSeconds = await probeDuration(outputPath);
-    const r2Key = `series/${job.seriesId}/episode-${job.episodeNumber}.mp4`;
+    const suffix = kind === 'replacement' ? '-replacement' : '';
+    const r2Key = `series/${job.seriesId}/episode-${job.episodeNumber}${suffix}.mp4`;
     await uploadEpisodeVideo(r2Key, outputPath);
-    await prisma.episode.update({
-      where: { id: job.episodeId },
-      data: {
-        r2Key,
-        durationSeconds,
-        status: 'draft',
-        uploadError: null,
-        tempVideoPath: null,
-      },
-    });
+    if (kind === 'replacement') {
+      await prisma.episode.update({
+        where: { id: job.episodeId },
+        data: {
+          replacementR2Key: r2Key,
+          replacementDurationSeconds: durationSeconds,
+          replacementStatus: 'ready',
+          replacementUploadError: null,
+          replacementTempVideoPath: null,
+        },
+      });
+    } else {
+      await prisma.episode.update({
+        where: { id: job.episodeId },
+        data: {
+          r2Key,
+          durationSeconds,
+          status: 'draft',
+          uploadError: null,
+          tempVideoPath: null,
+        },
+      });
+    }
     await rm(job.tempVideoPath, { force: true }).catch(() => undefined);
     await rm(outputPath, { force: true }).catch(() => undefined);
   } catch (error) {
     await rm(outputPath, { force: true }).catch(() => undefined);
+    if (kind === 'replacement') {
+      await prisma.episode.update({
+        where: { id: job.episodeId },
+        data: {
+          replacementStatus: 'failed',
+          replacementUploadError: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return;
+    }
     await prisma.episode.update({
       where: { id: job.episodeId },
       data: {

@@ -9,14 +9,29 @@ interface Series {
   id: string;
   title: string;
   status: string;
+  updateStatus: string;
   freeEpisodeCount: number;
   unlockPriceCents: number;
+  sortOrder: number;
+  lastPublishedEpisodeAt: string | null;
 }
 
 function authHeaders() {
   const token = localStorage.getItem('sd_admin_token');
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
+
+const STATUS_LABEL: Record<string, string> = {
+  published: '已上架',
+  draft: '草稿',
+  offline: '已下架',
+};
+
+const UPDATE_STATUS_LABEL: Record<string, string> = {
+  ongoing: '连载中',
+  completed: '已完结',
+  paused: '暂停更新',
+};
 
 export default function AdminDashboardPage() {
   const [seriesList, setSeriesList] = useState<Series[]>([]);
@@ -28,12 +43,20 @@ export default function AdminDashboardPage() {
   const [creating, setCreating] = useState(false);
   const [grantUserId, setGrantUserId] = useState('');
   const [grantSeriesId, setGrantSeriesId] = useState('');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [updateStatusFilter, setUpdateStatusFilter] = useState('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const creatingRef = useRef(false);
 
   async function loadSeries() {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/series`, { headers: authHeaders() });
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (updateStatusFilter !== 'all') params.set('updateStatus', updateStatusFilter);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE_URL}/api/admin/series${suffix}`, { headers: authHeaders() });
       if (!res.ok) {
         setListError('剧集列表加载失败，请重新登录后再试');
         return;
@@ -122,10 +145,9 @@ export default function AdminDashboardPage() {
   async function publishSeries(id: string) {
     setActionError('');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/series/${id}`, {
-        method: 'PATCH',
+      const res = await fetch(`${API_BASE_URL}/api/admin/series/${id}/publish`, {
+        method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ status: 'published' }),
       });
       if (!res.ok) {
         setActionError('上架失败，请稍后重试');
@@ -148,7 +170,8 @@ export default function AdminDashboardPage() {
   }
 
   const publishedCount = seriesList.filter((s) => s.status === 'published').length;
-  const draftCount = seriesList.length - publishedCount;
+  const offlineCount = seriesList.filter((s) => s.status === 'offline').length;
+  const draftCount = seriesList.filter((s) => s.status === 'draft').length;
 
   return (
     <div className="admin-shell">
@@ -187,14 +210,36 @@ export default function AdminDashboardPage() {
             <span>草稿</span>
             <strong>{draftCount}</strong>
           </article>
+          <article className="stat-card">
+            <span>已下架</span>
+            <strong>{offlineCount}</strong>
+          </article>
         </section>
 
         <article className="panel">
           <div className="panel-head">
             <div>
               <h2>剧集列表</h2>
-              <p>剧名、状态、免费集数、解锁价格。</p>
+              <p>剧名、状态、更新进度、免费集数、解锁价格。</p>
             </div>
+          </div>
+          <div className="admin-actions" style={{ padding: '0 16px 16px' }}>
+            <input placeholder="搜索剧名" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">全部状态</option>
+              <option value="draft">草稿</option>
+              <option value="published">已上架</option>
+              <option value="offline">已下架</option>
+            </select>
+            <select value={updateStatusFilter} onChange={(e) => setUpdateStatusFilter(e.target.value)}>
+              <option value="all">全部更新</option>
+              <option value="ongoing">连载中</option>
+              <option value="completed">已完结</option>
+              <option value="paused">暂停更新</option>
+            </select>
+            <button className="admin-btn" onClick={loadSeries}>
+              筛选
+            </button>
           </div>
           {(listError || actionError) && (
             <div style={{ padding: '0 16px 12px' }}>
@@ -208,8 +253,10 @@ export default function AdminDashboardPage() {
                 <tr>
                   <th>剧名</th>
                   <th>状态</th>
+                  <th>更新</th>
                   <th>免费集数</th>
                   <th>解锁价格</th>
+                  <th>最近更新</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -220,16 +267,18 @@ export default function AdminDashboardPage() {
                       <Link href={`/admin/series/${s.id}`}>{s.title}</Link>
                     </td>
                     <td>
-                      <span className={`status ${s.status === 'published' ? 'published' : 'draft'}`}>
-                        {s.status === 'published' ? '已上架' : '草稿'}
+                      <span className={`status ${s.status}`}>
+                        {STATUS_LABEL[s.status] ?? s.status}
                       </span>
                     </td>
+                    <td>{UPDATE_STATUS_LABEL[s.updateStatus] ?? s.updateStatus}</td>
                     <td>{s.freeEpisodeCount}</td>
-                    <td>NT${(s.unlockPriceCents / 100).toFixed(0)}</td>
+                    <td>{s.unlockPriceCents === 0 ? '免费观看' : `NT$${(s.unlockPriceCents / 100).toFixed(0)}`}</td>
+                    <td>{s.lastPublishedEpisodeAt ? new Date(s.lastPublishedEpisodeAt).toLocaleDateString() : '尚未更新'}</td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                         <Link href={`/admin/series/${s.id}`} className="admin-btn">
-                          管理集数
+                          运营工作台
                         </Link>
                         {s.status !== 'published' && (
                           <button className="admin-btn" onClick={() => publishSeries(s.id)}>

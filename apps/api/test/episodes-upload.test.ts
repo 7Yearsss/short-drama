@@ -293,4 +293,31 @@ describe('POST /api/admin/episodes/upload', () => {
     expect(episode.tempVideoPath).toBeNull();
     expect(episode.uploadError).toContain('queue unavailable');
   });
+
+  it('uploads a replacement video without changing the current r2Key', async () => {
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const episode = await prisma.episode.create({
+      data: { seriesId: series.id, episodeNumber: 8, title: 'Ep 8', status: 'published', r2Key: 'old.mp4' },
+    });
+    const multipart = await videoUploadPayload({});
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/episodes/${episode.id}/replacement/upload`,
+      headers: { authorization: `Bearer ${token}`, ...multipart.headers },
+      payload: multipart.payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: episode.id, r2Key: 'old.mp4', replacementStatus: 'processing' });
+    expect(enqueueEpisodeUpload).toHaveBeenCalledTimes(1);
+    const [queuedPrisma, job] = vi.mocked(enqueueEpisodeUpload).mock.calls[0];
+    expect(queuedPrisma).toBe(prisma);
+    expect(job).toEqual(
+      expect.objectContaining({ kind: 'replacement', episodeId: episode.id, seriesId: series.id, episodeNumber: 8 })
+    );
+    const logs = await prisma.adminAuditLog.findMany();
+    expect(logs.map((log) => log.action)).toEqual(['episode.replacement_start']);
+  });
 });

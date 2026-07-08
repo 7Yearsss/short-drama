@@ -199,6 +199,68 @@ describe('upload queue', () => {
     expect(mocks.uploadEpisodeVideo).not.toHaveBeenCalled();
   });
 
+  it('stores replacement video output without changing the published r2Key', async () => {
+    mocks.probeDuration.mockResolvedValue(88);
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const episode = await prisma.episode.create({
+      data: {
+        seriesId: series.id,
+        episodeNumber: 8,
+        title: 'Ep 8',
+        status: 'published',
+        r2Key: 'series/original/episode-8.mp4',
+        replacementStatus: 'processing',
+        replacementTempVideoPath: 'C:\\tmp\\replacement-8.mp4',
+      },
+    });
+
+    enqueueEpisodeUpload(prisma, {
+      kind: 'replacement',
+      episodeId: episode.id,
+      tempVideoPath: 'C:\\tmp\\replacement-8.mp4',
+      seriesId: series.id,
+      episodeNumber: 8,
+    });
+    await waitForQueueIdle();
+
+    const updated = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(updated.r2Key).toBe('series/original/episode-8.mp4');
+    expect(updated.replacementR2Key).toBe(`series/${series.id}/episode-8-replacement.mp4`);
+    expect(updated.replacementDurationSeconds).toBe(88);
+    expect(updated.replacementStatus).toBe('ready');
+    expect(updated.replacementUploadError).toBeNull();
+  });
+
+  it('marks replacement upload failed without changing the published r2Key', async () => {
+    mocks.transcodeVideo.mockRejectedValue(new Error('ffmpeg failed'));
+    const series = await prisma.series.create({ data: { title: 'Test Series' } });
+    const episode = await prisma.episode.create({
+      data: {
+        seriesId: series.id,
+        episodeNumber: 8,
+        title: 'Ep 8',
+        status: 'published',
+        r2Key: 'series/original/episode-8.mp4',
+        replacementStatus: 'processing',
+        replacementTempVideoPath: 'C:\\tmp\\replacement-8.mp4',
+      },
+    });
+
+    enqueueEpisodeUpload(prisma, {
+      kind: 'replacement',
+      episodeId: episode.id,
+      tempVideoPath: 'C:\\tmp\\replacement-8.mp4',
+      seriesId: series.id,
+      episodeNumber: 8,
+    });
+    await waitForQueueIdle();
+
+    const updated = await prisma.episode.findUniqueOrThrow({ where: { id: episode.id } });
+    expect(updated.r2Key).toBe('series/original/episode-8.mp4');
+    expect(updated.replacementStatus).toBe('failed');
+    expect(updated.replacementUploadError).toContain('ffmpeg failed');
+  });
+
   it('marks processing episodes as failed during orphan recovery', async () => {
     const series = await prisma.series.create({ data: { title: 'Test Series' } });
     const episode = await prisma.episode.create({
