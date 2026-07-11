@@ -12,6 +12,14 @@ export interface Series {
   lastPublishedEpisodeAt: string | null;
 }
 
+export interface BannerSeries {
+  id: string;
+  title: string;
+  coverUrl: string | null;
+  unlockPriceCents: number;
+  freeEpisodeCount: number;
+}
+
 export interface Episode {
   id: string;
   episodeNumber: number;
@@ -22,6 +30,12 @@ export interface Episode {
 export async function fetchSeriesList(): Promise<Series[]> {
   const res = await fetch(`${API_BASE_URL}/api/series`, { cache: 'no-store' });
   if (!res.ok) throw new Error('failed to load series');
+  return res.json();
+}
+
+export async function fetchHomeBanners(): Promise<BannerSeries[]> {
+  const res = await fetch(`${API_BASE_URL}/api/series/banners`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('failed to load home banners');
   return res.json();
 }
 
