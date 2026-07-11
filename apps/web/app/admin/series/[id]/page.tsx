@@ -16,6 +16,8 @@ interface SeriesDetail {
   freeEpisodeCount: number;
   unlockPriceCents: number;
   sortOrder: number;
+  isHomeBanner: boolean;
+  bannerOrder: number;
   lastPublishedEpisodeAt: string | null;
 }
 
@@ -148,6 +150,9 @@ export default function AdminSeriesEpisodesPage() {
   const [uploadError, setUploadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [bannerEnabled, setBannerEnabled] = useState(false);
+  const [bannerOrderInput, setBannerOrderInput] = useState('0');
+  const bannerInitialized = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -168,6 +173,11 @@ export default function AdminSeriesEpisodesPage() {
       const checks = (await checksRes.json()) as PublishChecks;
 
       setSeries(detail.series ?? null);
+      if (!bannerInitialized.current && detail.series) {
+        setBannerEnabled(detail.series.isHomeBanner);
+        setBannerOrderInput(String(detail.series.bannerOrder));
+        bannerInitialized.current = true;
+      }
       setRecentLogs(detail.recentLogs ?? []);
       setEpisodes(Array.isArray(episodeData) ? (episodeData as Episode[]) : []);
       setPublishChecks({
@@ -243,6 +253,31 @@ export default function AdminSeriesEpisodesPage() {
       await load();
     } catch {
       setActionError('下架剧集失败');
+    } finally {
+      setPendingActionId(null);
+    }
+  }
+
+  async function saveBannerSettings() {
+    setActionError('');
+    setPendingActionId('series-banner');
+    try {
+      const parsedOrder = Number(bannerOrderInput);
+      const res = await fetch(`${API_BASE_URL}/api/admin/series/${params.id}`, {
+        method: 'PATCH',
+        headers: authJsonHeaders(),
+        body: JSON.stringify({
+          isHomeBanner: bannerEnabled,
+          bannerOrder: Number.isFinite(parsedOrder) ? parsedOrder : 0,
+        }),
+      });
+      if (!res.ok) {
+        setActionError(await responseError(res, '保存 Banner 设置失败'));
+        return;
+      }
+      await load();
+    } catch {
+      setActionError('保存 Banner 设置失败');
     } finally {
       setPendingActionId(null);
     }
@@ -499,6 +534,47 @@ export default function AdminSeriesEpisodesPage() {
               <span className="view-status">
                 最近更新：{series?.lastPublishedEpisodeAt ? new Date(series.lastPublishedEpisodeAt).toLocaleString() : '暂无'}
               </span>
+            </div>
+          </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>Banner 设置</h2>
+              <p>勾选后该剧会出现在首页热播轮播，排序值越小越靠前。</p>
+            </div>
+            <div className="admin-actions">
+              <button
+                className="admin-btn admin-primary"
+                disabled={pendingActionId === 'series-banner'}
+                onClick={saveBannerSettings}
+              >
+                {pendingActionId === 'series-banner' ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+          <div className="form-grid" style={{ padding: 16 }}>
+            <div className="field">
+              <label htmlFor="bannerEnabled">
+                <input
+                  id="bannerEnabled"
+                  type="checkbox"
+                  checked={bannerEnabled}
+                  onChange={(e) => setBannerEnabled(e.target.checked)}
+                />{' '}
+                设为首页 Banner
+              </label>
+            </div>
+            <div className="field">
+              <label htmlFor="bannerOrder">排序值（越小越靠前）</label>
+              <input
+                id="bannerOrder"
+                type="number"
+                value={bannerOrderInput}
+                onChange={(e) => setBannerOrderInput(e.target.value)}
+                disabled={!bannerEnabled}
+              />
             </div>
           </div>
         </article>
