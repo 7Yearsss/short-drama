@@ -165,6 +165,27 @@ h1, h2, h3, p { margin: 0; }
 .membership-card h2 { margin-top: 6px; font-family: var(--font-display); font-size: clamp(22px, 6vw, 30px); letter-spacing: -.03em; }
 .membership-card p { margin-top: 8px; color: var(--fg-soft); line-height: 1.5; }
 
+.home-banner { margin-bottom: 20px; }
+.home-banner-track {
+  --home-banner-card-width: min(62vw, 260px);
+  display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory;
+  padding: 10px calc((100% - var(--home-banner-card-width)) / 2);
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.home-banner-track.single { justify-content: center; overflow-x: hidden; padding-inline: 0; }
+.home-banner-track::-webkit-scrollbar { display: none; }
+.home-banner-card {
+  position: relative; flex: 0 0 auto; width: var(--home-banner-card-width); aspect-ratio: 2/3;
+  border-radius: 20px; overflow: hidden; background-size: cover; background-position: center;
+  background-color: #171719; scroll-snap-align: center;
+  transition: transform .25s ease, opacity .25s ease;
+  box-shadow: 0 14px 30px rgba(0,0,0,.28);
+}
+.home-banner-title {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 36px 12px 14px;
+  background: linear-gradient(transparent, rgba(0,0,0,.72)); color: #fff; font-weight: 700;
+}
+
 .section-head { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin: 8px 0 14px; }
 .section-head h2 { font-family: var(--font-display); font-size: clamp(20px, 5vw, 28px); letter-spacing: -.02em; }
 .view-status { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }

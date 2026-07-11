@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import TopBar from '@/components/TopBar';
+import HomeBanner from '@/components/HomeBanner';
 import BottomNav from '@/components/BottomNav';
 import { fetchSeriesList, Series } from '@/lib/api-client';
 import { formatPriceCents } from '@/lib/format';
@@ -37,18 +38,7 @@ export default function HomePage() {
           <p>精选短剧持续上新，点开即看，前几集免费，会员解锁全集。</p>
         </header>
 
-        <section className="featured-row">
-          <article className="membership-card">
-            <div>
-              <div className="eyebrow">VIP</div>
-              <h2>会员抢先看</h2>
-              <p>解锁全集、无广告播放、高清画质。</p>
-            </div>
-            <Link href="/membership" className="vip-btn">
-              开通会员
-            </Link>
-          </article>
-        </section>
+        <HomeBanner />
 
         <section className="section-head">
           <h2>正在流行</h2>

@@ -10,6 +10,8 @@ interface SeriesBody {
   freeEpisodeCount?: number;
   unlockPriceCents?: number;
   status?: string;
+  isHomeBanner?: boolean;
+  bannerOrder?: number;
 }
 
 export async function seriesRoutes(app: FastifyInstance) {
@@ -211,6 +213,20 @@ export async function seriesRoutes(app: FastifyInstance) {
         { lastPublishedEpisodeAt: { sort: 'desc', nulls: 'last' } },
         { createdAt: 'desc' },
       ],
+    });
+  });
+
+  app.get('/api/series/banners', async () => {
+    return app.prisma.series.findMany({
+      where: { isHomeBanner: true, status: 'published' },
+      orderBy: { bannerOrder: 'asc' },
+      select: {
+        id: true,
+        title: true,
+        coverUrl: true,
+        unlockPriceCents: true,
+        freeEpisodeCount: true,
+      },
     });
   });
 

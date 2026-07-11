@@ -34,3 +34,10 @@ test('series workbench suggests the next episode number', () => {
   assert.match(workbenchPage, /nextEpisodeNumber/);
   assert.match(workbenchPage, /Math\.max/);
 });
+
+test('series workbench includes a home banner settings panel', () => {
+  assert.match(workbenchPage, />\s*Banner 设置\s*</);
+  assert.match(workbenchPage, /设为首页 Banner/);
+  assert.match(workbenchPage, /function saveBannerSettings/);
+  assert.match(workbenchPage, /isHomeBanner: bannerEnabled/);
+});
