@@ -350,4 +350,42 @@ describe('series routes', () => {
     expect(res.json().recentLogs[0].action).toBe('series.publish');
     await app.close();
   });
+
+  it('lists only home-banner published series ordered by bannerOrder on the public banners endpoint', async () => {
+    await prisma.series.create({
+      data: { title: 'Banner Second', status: 'published', isHomeBanner: true, bannerOrder: 2 },
+    });
+    await prisma.series.create({
+      data: { title: 'Banner First', status: 'published', isHomeBanner: true, bannerOrder: 1 },
+    });
+    await prisma.series.create({
+      data: { title: 'Not a banner', status: 'published', isHomeBanner: false },
+    });
+    await prisma.series.create({
+      data: { title: 'Banner but draft', status: 'draft', isHomeBanner: true, bannerOrder: 0 },
+    });
+    const app = buildApp({ prisma });
+    const res = await app.inject({ method: 'GET', url: '/api/series/banners' });
+    expect(res.statusCode).toBe(200);
+    const titles = res.json().map((s: { title: string }) => s.title);
+    expect(titles).toEqual(['Banner First', 'Banner Second']);
+    await app.close();
+  });
+
+  it('updates isHomeBanner and bannerOrder via admin PATCH', async () => {
+    const app = buildApp({ prisma });
+    const token = await adminToken(app);
+    const series = await prisma.series.create({ data: { title: '甜宠日记', status: 'published' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/series/${series.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { isHomeBanner: true, bannerOrder: 3 },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.isHomeBanner).toBe(true);
+    expect(body.bannerOrder).toBe(3);
+    await app.close();
+  });
 });

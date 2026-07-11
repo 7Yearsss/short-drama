@@ -38,6 +38,8 @@ model Series {
   status                 String    @default("draft")
   updateStatus           String    @default("ongoing")
   sortOrder              Int       @default(0)
+  isHomeBanner           Boolean   @default(false)
+  bannerOrder            Int       @default(0)
   lastPublishedEpisodeAt DateTime?
   publishedAt            DateTime?
   offlineAt              DateTime?
